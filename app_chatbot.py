@@ -22,7 +22,7 @@ URL_STATIC_HENTIAN = "https://gisdev.planmalaysia.gov.my/server/rest/services/Ho
 st.set_page_config(
     page_title="myBAS Melaka AI Assistant", page_icon="🚌", layout="centered"
 )
-st.title("🚌 Pembantu AI myBAS Melaka (OpenRouter Cloud)")
+st.title("🚌 Pembantu AI myBAS Melaka")
 
 
 # ==========================================
