@@ -7,19 +7,16 @@ import streamlit as st
 # ==========================================
 # 1. KONFIGURASI GROQ API
 # ==========================================
-# Ambil API Key Groq dari Streamlit Secrets
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", "")
-
-# Endpoint Groq API (OpenAI Compatible)
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-# Endpoint REST API dari ArcGIS Portal
+# Endpoint REST API ArcGIS Portal
 URL_REALTIME_BUS = "https://gisdev.planmalaysia.gov.my/server/rest/services/Hosted/myBAS_Melaka_Live_Kedudukan_Bas/FeatureServer/0/query"
 URL_STATIC_LALUAN = "https://gisdev.planmalaysia.gov.my/server/rest/services/Hosted/myBAS_Melaka_Laluan_Bas/FeatureServer/0/query"
 URL_STATIC_HENTIAN = "https://gisdev.planmalaysia.gov.my/server/rest/services/Hosted/myBAS_Melaka_Hentian_Bas/FeatureServer/0/query"
 
 st.set_page_config(
-    page_title="myBAS Melaka AI - Digital Command",
+    page_title="myBAS Melaka AI",
     page_icon="🤖",
     layout="centered"
 )
@@ -28,7 +25,6 @@ st.set_page_config(
 # 2. FUNGSI GEOMETRI (HAVERSINE)
 # ==========================================
 def haversine_distance(lat1, lon1, lat2, lon2):
-    """Mengira jarak sebenar antara dua koordinat (dalam kilometer)"""
     if None in (lat1, lon1, lat2, lon2):
         return None
     try:
@@ -46,9 +42,7 @@ def haversine_distance(lat1, lon1, lat2, lon2):
 # ==========================================
 st.markdown("""
     <style>
-    .stApp {
-        background-color: #0B0E14;
-    }
+    .stApp { background-color: #0B0E14; }
     .digital-header {
         background: linear-gradient(135deg, #0D1B2A 0%, #1B263B 100%);
         border: 1px solid #00E5FF;
@@ -66,18 +60,14 @@ st.markdown("""
         letter-spacing: 1.5px;
         margin: 0;
     }
-    .digital-status {
-        color: #39FF14;
-        font-size: 11px;
-        font-family: monospace;
-    }
+    .digital-status { color: #39FF14; font-size: 11px; font-family: monospace; }
     </style>
 """, unsafe_allow_html=True)
 
 st.markdown("""
     <div class="digital-header">
         <p class="digital-title">🚌 MYBAS MELAKA // AI COMMAND</p>
-        <span class="digital-status">● GROQ LLaMA-3 ENGINE ACTIVE</span>
+        <span class="digital-status">● GROQ ENGINE (TOKEN OPTIMIZED)</span>
     </div>
 """, unsafe_allow_html=True)
 
@@ -86,62 +76,49 @@ st.markdown("""
 # ==========================================
 @st.cache_data(ttl=30)
 def get_arcgis_data():
-    """Tarik data PENUH dari Feature Layer ArcGIS Portal"""
-    params = {
-        'where': '1=1',
-        'outFields': '*',
-        'f': 'json',
-        'resultRecordCount': 2000
-    }
-    summary = {
-        "realtime_bus": [],
-        "static_laluan": [],
-        "static_hentian": []
-    }
+    params = {'where': '1=1', 'outFields': '*', 'f': 'json', 'resultRecordCount': 2000}
+    summary = {"realtime_bus": [], "static_laluan": [], "static_hentian": []}
 
-    # 1. Data Kedudukan Bas Live
     try:
         res = requests.get(URL_REALTIME_BUS, params=params, verify=False).json()
         for f in res.get('features', []):
             attrs = f.get('attributes', {})
             geom = f.get('geometry', {})
             summary["realtime_bus"].append({
-                "Plat/Label": attrs.get('label_bas') or attrs.get('vehicle_id'),
-                "Kod Laluan": str(attrs.get('kod_laluan') or '').strip().upper(),
-                "Nama Laluan": attrs.get('nama_laluan'),
-                "Kelajuan (km/h)": attrs.get('kelajuan_kmh') or 30,
+                "Plat": attrs.get('label_bas') or attrs.get('vehicle_id'),
+                "Kod": str(attrs.get('kod_laluan') or '').strip().upper(),
+                "Nama": attrs.get('nama_laluan'),
+                "Laju": attrs.get('kelajuan_kmh') or 30,
                 "Lat": geom.get('y'),
                 "Lon": geom.get('x')
             })
     except Exception as e:
-        summary["realtime_bus"] = f"Ralat: {e}"
+        summary["realtime_bus"] = []
 
-    # 2. Data Garisan Laluan Static
     try:
         res = requests.get(URL_STATIC_LALUAN, params=params, verify=False).json()
         for f in res.get('features', []):
             attrs = f.get('attributes', {})
             summary["static_laluan"].append({
-                "Kod Laluan": str(attrs.get('kod_laluan') or '').strip().upper(),
-                "Nama Laluan": attrs.get('nama_laluan')
+                "Kod": str(attrs.get('kod_laluan') or '').strip().upper(),
+                "Nama": attrs.get('nama_laluan')
             })
     except Exception as e:
-        summary["static_laluan"] = f"Ralat: {e}"
+        summary["static_laluan"] = []
 
-    # 3. Data Hentian Bas Static
     try:
         res = requests.get(URL_STATIC_HENTIAN, params=params, verify=False).json()
         for f in res.get('features', []):
             attrs = f.get('attributes', {})
             geom = f.get('geometry', {})
             summary["static_hentian"].append({
-                "ID Hentian": attrs.get('stop_id') or attrs.get('OBJECTID'),
-                "Nama Hentian": attrs.get('nama_hentian') or attrs.get('nama_stop') or attrs.get('name'),
+                "ID": attrs.get('stop_id') or attrs.get('OBJECTID'),
+                "Nama": attrs.get('nama_hentian') or attrs.get('nama_stop') or attrs.get('name'),
                 "Lat": geom.get('y'),
                 "Lon": geom.get('x')
             })
     except Exception as e:
-        summary["static_hentian"] = f"Ralat: {e}"
+        summary["static_hentian"] = []
 
     return summary
 
@@ -151,7 +128,7 @@ def get_arcgis_data():
 if "messages" not in st.session_state:
     st.session_state.messages = [{
         "role": "assistant",
-        "content": "⚡ **Sistem AI myBAS Command Center Active (Groq LLaMA Mode).**\nSedia memproses pertanyaan laluan, penapisan bas tepat, dan carian semua hentian."
+        "content": "⚡ **Sistem AI myBAS Command Center Active.**\nSedia memproses pertanyaan laluan, penapisan bas tepat, dan carian hentian."
     }]
 
 for msg in st.session_state.messages:
@@ -165,63 +142,66 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
     with st.spinner("🤖 AI sedang memproses jawapan & menganalisis data GIS..."):
         arcgis_data = get_arcgis_data()
 
-        # Matriks Pengiraan ETA
+        # Matriks Pengiraan ETA & Penapisan Hentian Berdekatan
         eta_info = []
+        relevant_stops = []
+        user_query_lower = user_input.lower()
+
         if isinstance(arcgis_data["realtime_bus"], list) and isinstance(arcgis_data["static_hentian"], list):
             for bus in arcgis_data["realtime_bus"]:
                 b_lat, b_lon = bus.get("Lat"), bus.get("Lon")
-                bus_route = bus.get("Kod Laluan")
-                speed = bus.get("Kelajuan (km/h)") or 30
-                
+                bus_route = bus.get("Kod")
+                speed = bus.get("Laju") or 30
+
                 if b_lat and b_lon:
                     for stop in arcgis_data["static_hentian"]:
                         s_lat, s_lon = stop.get("Lat"), stop.get("Lon")
                         dist = haversine_distance(b_lat, b_lon, s_lat, s_lon)
-                        
+                        stop_name = str(stop.get("Nama") or "")
+
+                        # Tapis hentian yang relevan sahaja untuk jimat token (dalam 5km ATAU disebut pengguna)
                         if dist is not None and dist <= 5.0:
                             eta_minutes = round((dist / max(speed, 10)) * 60)
                             eta_info.append({
-                                "Plat Bas": bus.get("Plat/Label"),
-                                "Kod Laluan": bus_route,
-                                "Hentian": stop.get("Nama Hentian"),
-                                "Jarak (KM)": dist,
-                                "ETA (Minit)": max(eta_minutes, 1)
+                                "Plat": bus.get("Plat"),
+                                "Kod": bus_route,
+                                "Hentian": stop_name,
+                                "Jarak_KM": dist,
+                                "ETA_Minit": max(eta_minutes, 1)
                             })
+                            if stop_name not in relevant_stops:
+                                relevant_stops.append(stop_name)
+                        elif any(word in stop_name.lower() for word in user_query_lower.split() if len(word) > 3):
+                            if stop_name not in relevant_stops:
+                                relevant_stops.append(stop_name)
+
+        # Padatkan teks hentian untuk jimat token
+        stops_summary = ", ".join(relevant_stops[:30]) if relevant_stops else "Tiada hentian spesifik berdekatan dikesan."
 
         system_instructions = f"""
-        Anda adalah sistem AI Urban Transit Assistant untuk myBAS Melaka. Jawab soalan pengguna dengan Bahasa Melayu yang sopan, profesional, dan berstruktur.
+        Anda AI Urban Transit Assistant myBAS Melaka. Jawab sopan & profesional dalam Bahasa Melayu.
 
-        --- DATA LIVE KEDUDUKAN BAS ---
-        Bas Aktif: {arcgis_data['realtime_bus']}
+        DATA BAS LIVE: {arcgis_data['realtime_bus']}
+        ANALISIS ETA (<5KM): {eta_info if eta_info else "Tiada bas dalam julat 5km."}
+        SENARAI LALUAN: {arcgis_data['static_laluan']}
+        HENTIAN RELEVAN DIKESAN: {stops_summary}
 
-        --- ANALISIS ETA HAVERSINE (JULAT 5KM) ---
-        {eta_info if eta_info else "Tiada bas dikesan berdekatan hentian semasa."}
-
-        --- DATA LALUAN BAS ---
-        {arcgis_data['static_laluan']}
-
-        --- KESELURUHAN SENARAI HENTIAN BAS BERDAFTAR ({len(arcgis_data['static_hentian']) if isinstance(arcgis_data['static_hentian'], list) else 0} Hentian) ---
-        {arcgis_data['static_hentian']}
-
-        --------------------------------------------------
-        PERATURAN JAWAPAN TEPAT:
-        1. UTAMAKAN KOD LALUAN: Apabila pengguna bertanyakan bas terdekat untuk hentian tertentu (contoh: Taman Kota Laksamana / CIMB di Laluan M100), HANYA kaitkan bas yang beroperasi pada Laluan M100. JANGAN berikan bas dari laluan berlainan (seperti M22).
-        2. Jika tiada bas M100 aktif pada masa nyata, maklumkan secara jujur bahawa "Tiada bas M100 aktif pada masa ini" dan elakkan daripada salah beri maklumat bas M22.
-        3. Gunakan senarai penuh hentian di atas untuk mengesahkan tempat yang ditanya pengguna.
+        PERATURAN:
+        1. UTAMAKAN KOD LALUAN: Jika pengguna tanya bas terdekat untuk hentian di Laluan M100, HANYA kaitkan bas Kod M100. JANGAN campur bas laluan lain (seperti M22).
+        2. Jika tiada bas aktif untuk kod laluan berkenaan, jawab secara jujur.
         """
 
-        # Format mesej gaya OpenAI/Groq
+        # Ringkaskan muatan mesej (hanya ambil 3 mesej perbualan terakhir)
         messages_payload = [{"role": "system", "content": system_instructions}]
-        
-        # Masukkan sejarah perbualan (6 mesej terakhir)
-        for msg in st.session_state.messages[-6:]:
+        for msg in st.session_state.messages[-3:]:
             role_type = "user" if msg["role"] == "user" else "assistant"
             messages_payload.append({"role": role_type, "content": msg["content"]})
 
         payload = {
-            "model": "openai/gpt-oss-120b",
+            "model": "llama-3.3-70b-versatile",
             "messages": messages_payload,
-            "temperature": 0.1
+            "temperature": 0.1,
+            "max_tokens": 600
         }
 
         headers = {
@@ -236,11 +216,10 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
                 data = response.json()
                 answer = data['choices'][0]['message']['content']
             else:
-                answer = f"⚠️ Ralat API Groq ({response.status_code}): {response.text}"
+                answer = f"⚠️️ Ralat API Groq ({response.status_code}): {response.text}"
         except Exception as e:
             answer = f"⚠️ Ralat Sambungan: {e}"
 
-    # EFEK MENAIP (TYPING ANIMATION)
     def stream_response(text):
         for word in text.split(" "):
             yield word + " "
