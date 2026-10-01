@@ -27,10 +27,10 @@ st.set_page_config(
 # ==========================================
 def get_active_chat_models(api_key):
     if not api_key:
-        return []
+        return ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
     headers = {"Authorization": f"Bearer {api_key}"}
     try:
-        res = requests.get(GROQ_MODELS_URL, headers=headers, timeout=10)
+        res = requests.get(GROQ_MODELS_URL, headers=headers, timeout=5)
         if res.status_code == 200:
             data = res.json()
             all_models = [m.get("id") for m in data.get("data", []) if m.get("id")]
@@ -43,35 +43,32 @@ def get_active_chat_models(api_key):
                 return chat_models
     except Exception:
         pass
-    return ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"]
+    return ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
 
 # ==========================================
 # 3. TARIK DATA DARI FEATURE LAYER ARCGIS
 # ==========================================
 @st.cache_data(ttl=30)
 def get_feature_layer_data():
-    params = {'where': '1=1', 'outFields': '*', 'f': 'json', 'resultRecordCount': 1000}
+    params = {'where': '1=1', 'outFields': '*', 'f': 'json', 'resultRecordCount': 500}
     layer_data = {"bas_live": [], "laluan": [], "hentian": []}
 
-    # 1. Feature Layer Bas Live
     try:
-        res = requests.get(URL_REALTIME_BUS, params=params, verify=False, timeout=10).json()
+        res = requests.get(URL_REALTIME_BUS, params=params, verify=False, timeout=5).json()
         for f in res.get('features', []):
             layer_data["bas_live"].append(f.get('attributes', {}))
     except Exception:
         pass
 
-    # 2. Feature Layer Laluan
     try:
-        res = requests.get(URL_STATIC_LALUAN, params=params, verify=False, timeout=10).json()
+        res = requests.get(URL_STATIC_LALUAN, params=params, verify=False, timeout=5).json()
         for f in res.get('features', []):
             layer_data["laluan"].append(f.get('attributes', {}))
     except Exception:
         pass
 
-    # 3. Feature Layer Hentian
     try:
-        res = requests.get(URL_STATIC_HENTIAN, params=params, verify=False, timeout=10).json()
+        res = requests.get(URL_STATIC_HENTIAN, params=params, verify=False, timeout=5).json()
         for f in res.get('features', []):
             layer_data["hentian"].append(f.get('attributes', {}))
     except Exception:
@@ -115,7 +112,7 @@ st.markdown("""
 if "messages" not in st.session_state:
     st.session_state.messages = [{
         "role": "assistant",
-        "content": "Hai! Saya AI myBAS Melaka. Ada apa-apa nak tanya pasal kedudukan bas, laluan, atau hentian hari ini?"
+        "content": "Hai! Saya AI Pembantu myBAS Melaka. Boleh tanya saya pasal kedudukan bas live, laluan, atau senarai hentian hari ini!"
     }]
 
 for msg in st.session_state.messages:
@@ -126,34 +123,31 @@ if user_input := st.chat_input("Tanya apa sahaja tentang myBAS Melaka..."):
     st.session_state.messages.append({"role": "user", "content": user_input})
     st.chat_message("user", avatar="👤").write(user_input)
 
-    with st.spinner("Semak data Feature Layer..."):
+    with st.spinner("Semak data Feature Layer & memproses jawapan..."):
         features = get_feature_layer_data()
 
-        # Dapatkan ringkasan jumlah
         total_bas = len(features["bas_live"])
         total_laluan = len(features["laluan"])
         total_hentian = len(features["hentian"])
 
-        # Hadkan data untuk dimasukkan dalam prompt supaya tak overflow token
-        data_bas_sample = features["bas_live"][:20]
-        data_laluan_sample = features["laluan"][:20]
-        data_hentian_sample = features["hentian"][:20]
+        # Hadkan data sampel untuk memastikan saiz token sentiasa kecil
+        data_bas_sample = features["bas_live"][:10]
+        data_laluan_sample = features["laluan"][:10]
 
-        # SYSTEM PROMPT SANTAI & RILEX
+        # SYSTEM PROMPT SANTAI & FLEKSIBEL
         system_instructions = f"""
-        Anda ialah pembantu AI mesra untuk myBAS Melaka. Jawab soalan pengguna secara rilex, santai, mesra, dan terus kepada point.
+        Anda ialah AI Pembantu mesra myBAS Melaka. Jawab soalan pengguna dengan santai, rilex, dan mesra dalam Bahasa Melayu.
 
-        DATA SEBENAR DARI FEATURE LAYER ARCGIS:
-        - Jumlah Bas Live Aktif Sekarang: {total_bas} bas.
-        - Data Atribut Bas Live: {data_bas_sample}
-        - Data Atribut Laluan: {data_laluan_sample}
-        - Data Atribut Hentian: {data_hentian_sample}
+        DATA TERKINI FEATURE LAYER ARCGIS:
+        - Jumlah Bas Live Aktif Masa Nyata: {total_bas} bas.
+        - Ringkasan Data Bas Live: {data_bas_sample}
+        - Ringkasan Data Laluan: {data_laluan_sample}
+        - Jumlah Hentian Dikesan: {total_hentian} hentian.
 
         PANDUAN JAWAPAN:
-        1. Jawab soalan berdasarkan data Feature Layer di atas sahaja.
-        2. Gunakan nada percakapan harian yang santai (contoh: "Sekarang ada X bas tengah jalan...", "Untuk laluan tu ada...").
-        3. Jika data tiada atau kosong dalam Feature Layer, beritahu terus secara jujur dan rilex.
-        4. Jangan mereka-reka maklumat luar atau mengulang ayat yang sama.
+        1. Sekiranya pengguna beri teguran mesra / umum (seperti "hi", "apa awak boleh bantu"), sambut mesra dan terangkan secara ringkas yang anda boleh bantu semak status bas live, laluan, dan hentian myBAS Melaka.
+        2. Sekiranya soalan berkaitan bas/laluan/hentian, jawab berdasarkan data Feature Layer di atas secara terus.
+        3. Sekiranya data tiada atau kosong, beritahu secara jujur dan rilex.
         """
 
         messages_payload = [{"role": "system", "content": system_instructions}]
@@ -162,6 +156,8 @@ if user_input := st.chat_input("Tanya apa sahaja tentang myBAS Melaka..."):
             messages_payload.append({"role": role_type, "content": msg["content"]})
 
         answer = None
+        last_error_debug = ""
+
         if GROQ_API_KEY:
             active_chat_models = get_active_chat_models(GROQ_API_KEY)
             headers = {
@@ -173,22 +169,26 @@ if user_input := st.chat_input("Tanya apa sahaja tentang myBAS Melaka..."):
                 payload = {
                     "model": model_name,
                     "messages": messages_payload,
-                    "temperature": 0.4,  # Lebih fleksibel dan santai
-                    "max_tokens": 400
+                    "max_tokens": 300
                 }
                 try:
-                    response = requests.post(GROQ_API_URL, headers=headers, json=payload, timeout=15)
+                    response = requests.post(GROQ_API_URL, headers=headers, json=payload, timeout=10)
                     res_data = response.json()
+                    
                     if response.status_code == 200 and "choices" in res_data:
                         answer = res_data["choices"][0]["message"]["content"]
                         break
-                except Exception:
+                    else:
+                        err_msg = res_data.get("error", {}).get("message", "Tiada maklumat ralat")
+                        last_error_debug = f"HTTP {response.status_code} ({model_name}): {err_msg}"
+                except Exception as e:
+                    last_error_debug = f"Exception: {str(e)}"
                     continue
 
             if not answer:
-                answer = "Maaf, sistem AI tak dapat respons sekejap. Boleh cuba tanya lagi?"
+                answer = f"⚠️ Ralat Groq API: {last_error_debug if last_error_debug else 'Gagal menghubungi API'}. Sila pastikan GROQ_API_KEY sah."
         else:
-            answer = "⚠️ GROQ_API_KEY tak dijumpai dalam Streamlit Secrets."
+            answer = "⚠️ GROQ_API_KEY tidak dijumpai dalam Streamlit Secrets."
 
     def stream_response(text):
         for word in text.split(" "):
