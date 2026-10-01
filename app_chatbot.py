@@ -2,15 +2,14 @@ import math
 import time
 import requests
 import streamlit as st
-from groq import Groq
 
 # ==========================================
-# 1. KONFIGURASI GROQ API & CLIENT
+# 1. KONFIGURASI GROQ API (DIRECT REST API)
 # ==========================================
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", "").strip()
 
-# Inisialisasi SDK Rasmi Groq (Gunakan URL lalai)
-client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+# Endpoint REST API Rasmi Groq
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 # Endpoint REST API ArcGIS Portal
 URL_REALTIME_BUS = "https://gisdev.planmalaysia.gov.my/server/rest/services/Hosted/myBAS_Melaka_Live_Kedudukan_Bas/FeatureServer/0/query"
@@ -69,7 +68,7 @@ st.markdown("""
 st.markdown("""
     <div class="digital-header">
         <p class="digital-title">🚌 MYBAS MELAKA // AI COMMAND</p>
-        <span class="digital-status">● GROQ LLaMA 3.1 SDK (ONLINE)</span>
+        <span class="digital-status">● DIRECT REST API CONNECTED</span>
     </div>
 """, unsafe_allow_html=True)
 
@@ -196,17 +195,36 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
             messages_payload.append({"role": role_type, "content": msg["content"]})
 
         answer = None
-        if client:
-            try:
-                chat_completion = client.chat.completions.create(
-                    messages=messages_payload,
-                    model="llama-3.1-8b-instant",
-                    temperature=0.1,
-                    max_tokens=600
-                )
-                answer = chat_completion.choices[0].message.content
-            except Exception as e:
-                answer = f"⚠️ Ralat API Groq: {e}"
+        if GROQ_API_KEY:
+            # Senarai model terkini dengan fallback automatik
+            candidate_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama3-8b-8192"]
+            
+            headers = {
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            }
+
+            for model_name in candidate_models:
+                payload = {
+                    "model": model_name,
+                    "messages": messages_payload,
+                    "temperature": 0.1,
+                    "max_tokens": 600
+                }
+                
+                try:
+                    response = requests.post(GROQ_API_URL, headers=headers, json=payload, timeout=15)
+                    res_data = response.json()
+                    
+                    if response.status_code == 200 and "choices" in res_data:
+                        answer = res_data["choices"][0]["message"]["content"]
+                        break
+                    else:
+                        # Tangkap mesej ralat khusus jika ada
+                        err_msg = res_data.get("error", {}).get("message", "Unknown error")
+                        answer = f"⚠️ Ralat HTTP {response.status_code} ({model_name}): {err_msg}"
+                except Exception as e:
+                    answer = f"⚠️ Ralat Sambungan: {e}"
         else:
             answer = "⚠️ Ralat: GROQ_API_KEY tidak sah atau tidak dijumpai dalam Streamlit Secrets."
 
