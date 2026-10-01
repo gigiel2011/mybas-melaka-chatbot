@@ -7,11 +7,16 @@ import streamlit as st
 # ==========================================
 # 1. KONFIGURASI GOOGLE GEMINI DIRECT API
 # ==========================================
-# Ambil API Key bermula AQ... dari Streamlit Secrets
+# Ambil API Key dari Streamlit Secrets
 API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
-# Endpoint URL Gemini tanpa parameter key di URL
-GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+# Senarai Endpoint Model Gemini untuk Percubaan (Fallback jika 404)
+GEMINI_MODELS = [
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent",
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent",
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent"
+]
 
 # Endpoint REST API dari ArcGIS Portal
 URL_REALTIME_BUS = "https://gisdev.planmalaysia.gov.my/server/rest/services/Hosted/myBAS_Melaka_Live_Kedudukan_Bas/FeatureServer/0/query"
@@ -77,7 +82,7 @@ st.markdown("""
 st.markdown("""
     <div class="digital-header">
         <p class="digital-title">🚌 MYBAS MELAKA // AI COMMAND</p>
-        <span class="digital-status">● GOOGLE GEMINI DIRECT (HEADER AUTH ACTIVE)</span>
+        <span class="digital-status">● GOOGLE GEMINI DIRECT (AUTO-MODEL RECOVERY ACTIVE)</span>
     </div>
 """, unsafe_allow_html=True)
 
@@ -234,22 +239,30 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
             }
         }
 
-        # KUNCI UTAMA: Hantar API key dalam HEADERS (x-goog-api-key)
+        # Header keselamatan dengan API Key
         headers = {
             "Content-Type": "application/json",
             "x-goog-api-key": API_KEY.strip()
         }
 
         answer = None
-        try:
-            response = requests.post(GEMINI_ENDPOINT, headers=headers, json=payload, timeout=30)
-            if response.status_code == 200:
-                data = response.json()
-                answer = data['candidates'][0]['content']['parts'][0]['text']
-            else:
-                answer = f"⚠️ Ralat API Gemini ({response.status_code}): {response.text}"
-        except Exception as e:
-            answer = f"⚠️ Ralat Sambungan: {e}"
+        last_error = ""
+
+        # MENCUBA MODEL SECARA BERURUTAN JIKA BERLAKU 404
+        for endpoint in GEMINI_MODELS:
+            try:
+                response = requests.post(endpoint, headers=headers, json=payload, timeout=30)
+                if response.status_code == 200:
+                    data = response.json()
+                    answer = data['candidates'][0]['content']['parts'][0]['text']
+                    break
+                else:
+                    last_error = f"HTTP {response.status_code}: {response.text}"
+            except Exception as e:
+                last_error = str(e)
+
+        if not answer:
+            answer = f"⚠️ Ralat API Gemini: Gagal menyambung ke endpoint Gemini.\nPerincian: {last_error}"
 
     # EFEK MENAIP (TYPING ANIMATION)
     def stream_response(text):
