@@ -1,3 +1,4 @@
+import math
 import os
 import requests
 import streamlit as st
@@ -20,10 +21,34 @@ URL_STATIC_LALUAN = "https://gisdev.planmalaysia.gov.my/server/rest/services/Hos
 URL_STATIC_HENTIAN = "https://gisdev.planmalaysia.gov.my/server/rest/services/Hosted/myBAS_Melaka_Hentian_Bas/FeatureServer/0/query"
 
 st.set_page_config(
-    page_title="myBAS Melaka AI",
+    page_title="myBAS Melaka AI - Digital Command",
     page_icon="🤖",
     layout="centered",
 )
+
+
+# ==========================================
+# 2. FUNGSI GEOMETRI & PENGIRAAN JARAK (HAVERSINE)
+# ==========================================
+def haversine_distance(lat1, lon1, lat2, lon2):
+  """Mengira jarak sebenar antara dua koordinat (dalam kilometer)"""
+  if None in (lat1, lon1, lat2, lon2):
+    return None
+  try:
+    R = 6371.0  # Jejari bumi dalam KM
+    dlat = math.radians(float(lat2) - float(lat1))
+    dlon = math.radians(float(lon2) - float(lon1))
+    a = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(math.radians(float(lat1)))
+        * math.cos(math.radians(float(lat2)))
+        * math.sin(dlon / 2) ** 2
+    )
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return round(R * c, 2)
+  except Exception:
+    return None
+
 
 # ==========================================
 # GAYA CSS DIGITAL & DARK MODE
@@ -31,11 +56,9 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    /* Latar belakang utama */
     .stApp {
         background-color: #0B0E14;
     }
-    /* Kad Header Digital Command */
     .digital-header {
         background: linear-gradient(135deg, #0D1B2A 0%, #1B263B 100%);
         border: 1px solid #00E5FF;
@@ -63,12 +86,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Header Utama Visual
 st.markdown(
     """
     <div class="digital-header">
-        <p class="digital-title">🚌 MYBAS MELAKA</p>
-        <span class="digital-status">● SYSTEM ONLINE (LIVE FEED)</span>
+        <p class="digital-title">🚌 MYBAS MELAKA // AI COMMAND</p>
+        <span class="digital-status">● SYSTEM ONLINE (REAL-TIME GEOMETRY & ETA ACTIVE)</span>
     </div>
 """,
     unsafe_allow_html=True,
@@ -76,10 +98,10 @@ st.markdown(
 
 
 # ==========================================
-# 2. FUNGSI TARIK DATA DARI ARCGIS PORTAL
+# 3. FUNGSI TARIK DATA DARI ARCGIS PORTAL
 # ==========================================
 def get_arcgis_data():
-  """Tarik data penuh dari Feature Layer ArcGIS Portal"""
+  """Tarik data penuh dari Feature Layer ArcGIS Portal termasuk koordinat geometri"""
   params = {
       "where": "1=1",
       "outFields": "*",
@@ -93,12 +115,14 @@ def get_arcgis_data():
     res = requests.get(URL_REALTIME_BUS, params=params, verify=False).json()
     for f in res.get("features", []):
       attrs = f.get("attributes", {})
+      geom = f.get("geometry", {})
       summary["realtime_bus"].append({
           "Plat/Label": attrs.get("label_bas") or attrs.get("vehicle_id"),
           "Kod Laluan": attrs.get("kod_laluan"),
           "Nama Laluan": attrs.get("nama_laluan"),
-          "Kelajuan (km/h)": attrs.get("kelajuan_kmh"),
-          "Arah (Bearing)": attrs.get("bearing"),
+          "Kelajuan (km/h)": attrs.get("kelajuan_kmh") or 30,  # Default 30km/h
+          "Lat": geom.get("y"),
+          "Lon": geom.get("x"),
           "Masa Kemaskini": attrs.get("last_updated"),
       })
   except Exception as e:
@@ -118,7 +142,7 @@ def get_arcgis_data():
   except Exception as e:
     summary["static_laluan"] = f"Ralat: {e}"
 
-  # 3. Data Hentian Bas Static (Dapatkan Koordinat & Nama)
+  # 3. Data Hentian Bas Static
   try:
     res = requests.get(URL_STATIC_HENTIAN, params=params, verify=False).json()
     for f in res.get("features", []):
@@ -129,7 +153,8 @@ def get_arcgis_data():
           "Nama Hentian": attrs.get("nama_hentian")
           or attrs.get("nama_stop")
           or attrs.get("name"),
-          "Koordinat (X,Y)": f"{geom.get('x', '')}, {geom.get('y', '')}",
+          "Lat": geom.get("y"),
+          "Lon": geom.get("x"),
           "Waktu Operasi": (
               f"{attrs.get('waktu_pertama', '')} -"
               f" {attrs.get('waktu_terakhir', '')}"
@@ -142,18 +167,19 @@ def get_arcgis_data():
 
 
 # ==========================================
-# 3. ANTARAMUKA CHATBOT (STREAMLIT)
+# 4. ANTARAMUKA CHATBOT & INGATAN SEJARAH
 # ==========================================
 if "messages" not in st.session_state:
   st.session_state.messages = [{
       "role": "assistant",
       "content": (
-          "⚡ **Sistem AI myBAS Aktif.** Sedia membantu pertanyaan berkaitan laluan,"
-          " hentian, dan status bas aktif."
+          "⚡ **Sistem AI myBAS Command Center Active.**\nSedia memproses"
+          " kueri spatial, pengiraan ETA masa nyata, dan analisis koridor"
+          " laluan."
       ),
   }]
 
-# Papar Sembang dengan Avatar Digital
+# Papar Mesej Perbualan
 for msg in st.session_state.messages:
   avatar = "🤖" if msg["role"] == "assistant" else "👤"
   st.chat_message(msg["role"], avatar=avatar).write(msg["content"])
@@ -162,17 +188,42 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
   st.session_state.messages.append({"role": "user", "content": user_input})
   st.chat_message("user", avatar="👤").write(user_input)
 
-  with st.spinner("Mengimbas data ArcGIS Portal..."):
+  with st.spinner("Mengimbas geometri & data masa nyata ArcGIS..."):
     arcgis_data = get_arcgis_data()
+
+  # Pengiraan ETA & Matriks Jarak Ringkas antara Bas Live & Hentian
+  eta_info = []
+  if isinstance(arcgis_data["realtime_bus"], list) and isinstance(
+      arcgis_data["static_hentian"], list
+  ):
+    for bus in arcgis_data["realtime_bus"][:5]:  # Ambil sampel bas aktif
+      b_lat, b_lon = bus.get("Lat"), bus.get("Lon")
+      speed = bus.get("Kelajuan (km/h)") or 30
+      if b_lat and b_lon:
+        for stop in arcgis_data["static_hentian"]:
+          s_lat, s_lon = stop.get("Lat"), stop.get("Lon")
+          dist = haversine_distance(b_lat, b_lon, s_lat, s_lon)
+          if dist is not None and dist <= 3.0:  # Hentian dalam julat 3 KM
+            eta_minutes = round((dist / max(speed, 10)) * 60)
+            eta_info.append({
+                "Plat Bas": bus.get("Plat/Label"),
+                "Kod Laluan": bus.get("Kod Laluan"),
+                "Hentian Terdekat": stop.get("Nama Hentian"),
+                "Jarak (KM)": dist,
+                "Anggaran ETA (Minit)": max(eta_minutes, 1),
+            })
 
   system_prompt = f"""
     Anda adalah sistem kecerdasan buatan (AI Urban Transit Assistant) untuk myBAS Melaka.
-    Gunakan format maklum balas yang kemas, digital, tepat, dan mudah dibaca.
+    Gunakan format maklum balas yang kemas, digital, tepat, dan berstruktur (jadual/bullet points).
 
     --- DATA REALTIME (BASMY_REALTIME) ---
     Jumlah Bas Aktif Masa Kini: {len(arcgis_data['realtime_bus']) if isinstance(arcgis_data['realtime_bus'], list) else 0}
     Data Bas Live:
     {arcgis_data['realtime_bus']}
+
+    --- ANALISIS ETA MASA NYATA (HAVERSINE GEOMETRY MATRIX) ---
+    {eta_info if eta_info else "Tiada bas dikesan dalam julat 3km dari mana-mana hentian semasa."}
 
     --- DATA STATIC (BASMY - LALUAN & HENTIAN) ---
     Jumlah Laluan Berdaftar: {len(arcgis_data['static_laluan']) if isinstance(arcgis_data['static_laluan'], list) else 0}
@@ -180,20 +231,25 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
     {arcgis_data['static_laluan']}
 
     Jumlah Keseluruhan Hentian Bas Berdaftar: {len(arcgis_data['static_hentian']) if isinstance(arcgis_data['static_hentian'], list) else 0}
-    Senarai Hentian Bas:
-    {arcgis_data['static_hentian']}
+    Senarai Hentian Bas (Sampel Geometri):
+    {arcgis_data['static_hentian'][:100]}
 
     --------------------------------------------------
-    ARAHAN JAWAPAN & ANALISIS SPATIAL PINTAR:
+    ARAHAN JAWAPAN & ANALISIS PINTAR:
     1. Jawab dalam Bahasa Melayu yang profesional, futuristik, dan padat.
-    2. JUMLAH HENTIAN: Apabila pengguna bertanyakan jumlah keseluruhan hentian, gunakan 'Jumlah Keseluruhan Hentian Bas Berdaftar' ({len(arcgis_data['static_hentian'] if isinstance(arcgis_data['static_hentian'], list) else [])}).
-    3. PADANAN SPATIAL / CORRIDOR ANALYSIS:
-       - Memandangkan garisan laluan dan hentian adalah lapisan terpisah di GIS, gunakan kepintaran analisis nama kawasan/jalan untuk memadankan Hentian dengan Laluan.
-       - Contoh: Jika laluan bertajuk "Melaka Sentral - Batu Berendam - Alor Gajah", imbas Senarai Hentian Bas dan padankan semua hentian yang berada di sepanjang koridor nama kawasan tersebut (cth: Hentian Melaka Sentral, Hentian Batu Berendam, Hentian CTRM, Hentian Kilang, Hentian Alor Gajah).
-       - Nyatakan bahawa padanan ini dibuat berdasarkan analisis koridor laluan myBAS Melaka.
-    4. Gunakan simbol/pencetus visual seperti 🚌, 📍, ⏱️️, ⚡ untuk persembahan data digital.
-    5. Jika maklumat tiada dalam data, nyatakan dengan jujur dan jelas.
+    2. JUMLAH HENTIAN: Gunakan 'Jumlah Keseluruhan Hentian Bas Berdaftar' ({len(arcgis_data['static_hentian'] if isinstance(arcgis_data['static_hentian'], list) else [])}).
+    3. PENGAIRAN ETA / MASA KETIBAAN: Jika pengguna bertanya bila bas sampai atau jarak bas ke hentian, rujuk 'ANALISIS ETA MASA NYATA' di atas.
+    4. CORRIDOR MATCHING: Padankan Hentian ke Laluan berdasarkan analisis nama kawasan/jalan terdekat.
+    5. INGATAN PERBUALAN: Fahami konteks soalan terdahulu pengguna untuk soalan susulan.
+    6. Gunakan simbol visual seperti 🚌, 📍, ⏱️, ⚡.
     """
+
+  # Menyusun Payload dengan Ingatan Perbualan (Chat History - 6 Mesej Terakhir)
+  recent_history = st.session_state.messages[-6:]
+  messages_payload = [{"role": "system", "content": system_prompt}]
+
+  for msg in recent_history:
+    messages_payload.append({"role": msg["role"], "content": msg["content"]})
 
   headers = {
       "Authorization": f"Bearer {API_KEY}",
@@ -215,10 +271,7 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
   for model_name in FREE_MODELS:
     payload = {
         "model": model_name,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_input},
-        ],
+        "messages": messages_payload,
         "temperature": 0.2,
     }
 
