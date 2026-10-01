@@ -27,7 +27,7 @@ st.set_page_config(
 # 2. FUNGSI DAPATKAN SENARAI MODEL CHAT SAHAJA
 # ==========================================
 def get_active_chat_models(api_key):
-    """Mendapatkan senarai model CHAT/TEKS sahaja dan mengabaikan model audio (whisper)"""
+    """Mendapatkan senarai model CHAT/TEKS standard sahaja"""
     if not api_key:
         return []
     headers = {"Authorization": f"Bearer {api_key}"}
@@ -37,10 +37,10 @@ def get_active_chat_models(api_key):
             data = res.json()
             all_models = [m.get("id") for m in data.get("data", []) if m.get("id")]
             
-            # TAPIS: Abaikan model audio (whisper) & vision yang tidak menyokong chat completion standard
+            # TAPIS: Abaikan model audio, vision, guard, dan eksperimen/oss
             chat_models = [
                 m for m in all_models 
-                if not any(banned in m.lower() for banned in ["whisper", "vision", "guard"])
+                if not any(banned in m.lower() for banned in ["whisper", "vision", "guard", "gpt-oss", "preview"])
             ]
             
             # Utamakan model LLaMA 3.3 / LLaMA 3.1
@@ -50,7 +50,6 @@ def get_active_chat_models(api_key):
     except Exception:
         pass
         
-    # Fallback senarai model chat biasa jika panggilan endpoint models gagal
     return ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"]
 
 # ==========================================
@@ -99,7 +98,7 @@ st.markdown("""
 st.markdown("""
     <div class="digital-header">
         <p class="digital-title">🚌 MYBAS MELAKA // AI COMMAND</p>
-        <span class="digital-status">● CHAT MODEL FILTER ACTIVE</span>
+        <span class="digital-status">● CONTEXT OPTIMIZED & ACTIVE</span>
     </div>
 """, unsafe_allow_html=True)
 
@@ -205,15 +204,20 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
                             if stop_name not in relevant_stops:
                                 relevant_stops.append(stop_name)
 
-        stops_summary = ", ".join(relevant_stops[:30]) if relevant_stops else "Tiada hentian spesifik berdekatan dikesan."
+        stops_summary = ", ".join(relevant_stops[:15]) if relevant_stops else "Tiada hentian spesifik berdekatan dikesan."
+
+        # RINGKASKAN DATA DENGAN MERATAPKANNYA KEPADA MAKSIMUM 15 ELEMEN UNTUK MENGELAKKAN TOKEN OVERFLOW
+        realtime_summary = arcgis_data['realtime_bus'][:15]
+        laluan_summary = arcgis_data['static_laluan'][:15]
+        eta_summary = eta_info[:10] if eta_info else "Tiada bas dalam julat 5km."
 
         system_instructions = f"""
         Anda AI Urban Transit Assistant myBAS Melaka. Jawab sopan & profesional dalam Bahasa Melayu.
 
-        DATA BAS LIVE: {arcgis_data['realtime_bus']}
-        ANALISIS ETA (<5KM): {eta_info if eta_info else "Tiada bas dalam julat 5km."}
-        SENARAI LALUAN: {arcgis_data['static_laluan']}
-        HENTIAN RELEVAN DIKESAN: {stops_summary}
+        DATA BAS LIVE (15 TERATAS): {realtime_summary}
+        ANALISIS ETA (<5KM): {eta_summary}
+        SENARAI LALUAN: {laluan_summary}
+        HENTIAN RELEVAN: {stops_summary}
 
         PERATURAN:
         1. UTAMAKAN KOD LALUAN: Jika pengguna tanya bas terdekat untuk hentian di Laluan M100, HANYA kaitkan bas Kod M100. JANGAN campur bas laluan lain.
@@ -221,13 +225,13 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
         """
 
         messages_payload = [{"role": "system", "content": system_instructions}]
-        for msg in st.session_state.messages[-3:]:
+        # Hantar 2 mesej terakhir sahaja untuk jimat token
+        for msg in st.session_state.messages[-2:]:
             role_type = "user" if msg["role"] == "user" else "assistant"
             messages_payload.append({"role": role_type, "content": msg["content"]})
 
         answer = None
         if GROQ_API_KEY:
-            # Tapis dan dapatkan senarai model CHAT sahaja (tanpa Whisper)
             active_chat_models = get_active_chat_models(GROQ_API_KEY)
             
             headers = {
@@ -241,7 +245,7 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
                     "model": model_name,
                     "messages": messages_payload,
                     "temperature": 0.1,
-                    "max_tokens": 600
+                    "max_tokens": 400
                 }
                 
                 try:
