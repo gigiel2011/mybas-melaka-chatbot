@@ -139,8 +139,8 @@ if "messages" not in st.session_state:
     st.session_state.messages = [{
         "role": "assistant",
         "content": (
-            "⚡ **Sistem AI myBAS Aktif.** Sedia memproses pertanyaan laluan,"
-            " hentian, dan status bas live."
+            "⚡ **Sistem AI myBAS Aktif.** Sedia membantu pertanyaan berkaitan laluan,"
+            " hentian, dan status bas aktif."
         ),
     }]
 
