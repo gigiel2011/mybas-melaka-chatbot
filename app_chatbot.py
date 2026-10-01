@@ -9,16 +9,8 @@ from groq import Groq
 # ==========================================
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", "").strip()
 
-# Tetapan Client Groq dengan sambungan langsung rasmi
-client = None
-if GROQ_API_KEY:
-    try:
-        client = Groq(
-            api_key=GROQ_API_KEY,
-            base_url="https://api.groq.com/openai/v1"
-        )
-    except Exception as e:
-        st.error(f"Gagal memulakan Groq Client: {e}")
+# Inisialisasi SDK Rasmi Groq (Gunakan URL lalai)
+client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 # Endpoint REST API ArcGIS Portal
 URL_REALTIME_BUS = "https://gisdev.planmalaysia.gov.my/server/rest/services/Hosted/myBAS_Melaka_Live_Kedudukan_Bas/FeatureServer/0/query"
@@ -77,7 +69,7 @@ st.markdown("""
 st.markdown("""
     <div class="digital-header">
         <p class="digital-title">🚌 MYBAS MELAKA // AI COMMAND</p>
-        <span class="digital-status">● GROQ LLaMA 3.1 SDK (STABLE)</span>
+        <span class="digital-status">● GROQ LLaMA 3.1 SDK (ONLINE)</span>
     </div>
 """, unsafe_allow_html=True)
 
