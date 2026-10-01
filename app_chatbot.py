@@ -7,15 +7,11 @@ import streamlit as st
 # ==========================================
 # 1. KONFIGURASI GOOGLE GEMINI DIRECT API
 # ==========================================
-# Ambil dari st.secrets jika wujud
-API_KEY = st.secrets.get("GEMINI_API_KEY", "AIzaSy_TAMPAL_KEY_SINI_JIKA_LOKAL")
+# Ambil API Key bermula AQ... dari Streamlit Secrets
+API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
-# Endpoint URL Rasmi Google AI Studio
-ENDPOINT_MODELS = [
-    f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={API_KEY}",
-    f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={API_KEY}",
-    f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={API_KEY}"
-]
+# Endpoint URL Gemini tanpa parameter key di URL
+GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
 
 # Endpoint REST API dari ArcGIS Portal
 URL_REALTIME_BUS = "https://gisdev.planmalaysia.gov.my/server/rest/services/Hosted/myBAS_Melaka_Live_Kedudukan_Bas/FeatureServer/0/query"
@@ -81,7 +77,7 @@ st.markdown("""
 st.markdown("""
     <div class="digital-header">
         <p class="digital-title">🚌 MYBAS MELAKA // AI COMMAND</p>
-        <span class="digital-status">● GOOGLE GEMINI DIRECT (STABLE MODEL FALLBACK ACTIVE)</span>
+        <span class="digital-status">● GOOGLE GEMINI DIRECT (HEADER AUTH ACTIVE)</span>
     </div>
 """, unsafe_allow_html=True)
 
@@ -155,7 +151,7 @@ def get_arcgis_data():
 if "messages" not in st.session_state:
     st.session_state.messages = [{
         "role": "assistant",
-        "content": "⚡ **Sistem AI myBAS Command Center Active (Google Gemini Mode).**\nSedia memproses pertanyaan laluan, penapisan bas tepat, dan carian semua hentian."
+        "content": "⚡ **Sistem AI myBAS Command Center Active.**\nSedia memproses pertanyaan laluan, penapisan bas tepat, dan carian semua hentian."
     }]
 
 for msg in st.session_state.messages:
@@ -238,26 +234,22 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
             }
         }
 
-        headers = {"Content-Type": "application/json"}
+        # KUNCI UTAMA: Hantar API key dalam HEADERS (x-goog-api-key)
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": API_KEY.strip()
+        }
 
         answer = None
-        last_error = ""
-
-        # MENCUBA ENGIN MODEL GEMINI DENGAN FALLBACK
-        for target_url in ENDPOINT_MODELS:
-            try:
-                response = requests.post(target_url, headers=headers, json=payload, timeout=30)
-                if response.status_code == 200:
-                    data = response.json()
-                    answer = data['candidates'][0]['content']['parts'][0]['text']
-                    break
-                else:
-                    last_error = f"HTTP {response.status_code}: {response.text}"
-            except Exception as e:
-                last_error = str(e)
-
-        if not answer:
-            answer = f"⚠️️ Ralat API Gemini: Sila pastikan API Key dimasukkan dengan betul di Streamlit Secrets.\nDetail: {last_error}"
+        try:
+            response = requests.post(GEMINI_ENDPOINT, headers=headers, json=payload, timeout=30)
+            if response.status_code == 200:
+                data = response.json()
+                answer = data['candidates'][0]['content']['parts'][0]['text']
+            else:
+                answer = f"⚠️ Ralat API Gemini ({response.status_code}): {response.text}"
+        except Exception as e:
+            answer = f"⚠️ Ralat Sambungan: {e}"
 
     # EFEK MENAIP (TYPING ANIMATION)
     def stream_response(text):
