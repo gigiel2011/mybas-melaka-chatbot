@@ -21,7 +21,7 @@ URL_STATIC_LALUAN = "https://gisdev.planmalaysia.gov.my/server/rest/services/Hos
 URL_STATIC_HENTIAN = "https://gisdev.planmalaysia.gov.my/server/rest/services/Hosted/myBAS_Melaka_Hentian_Bas/FeatureServer/0/query"
 
 st.set_page_config(
-    page_title="myBAS Melaka AI - Digital Command",
+    page_title="myBAS Melaka AI",
     page_icon="🤖",
     layout="centered",
 )
@@ -68,8 +68,8 @@ st.markdown(
 st.markdown(
     """
     <div class="digital-header">
-        <p class="digital-title">🚌 MYBAS MELAKA // AI CONTROL</p>
-        <span class="digital-status">● SYSTEM ONLINE (ARCGIS LIVE FEED)</span>
+        <p class="digital-title">🚌 MYBAS MELAKA</p>
+        <span class="digital-status">● SYSTEM ONLINE (LIVE FEED)</span>
     </div>
 """,
     unsafe_allow_html=True,
