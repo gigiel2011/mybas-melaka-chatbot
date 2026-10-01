@@ -80,8 +80,14 @@ st.markdown(
 # 2. FUNGSI TARIK DATA DARI ARCGIS PORTAL
 # ==========================================
 def get_arcgis_data():
-    """Tarik data dari ketiga-tiga Feature Layer ArcGIS Portal"""
-    params = {"where": "1=1", "outFields": "*", "f": "json"}
+    """Tarik data penuh dari Feature Layer ArcGIS Portal"""
+    # Parameter resultRecordCount=2000 ditambah untuk mengatasi had query default ArcGIS
+    params = {
+        "where": "1=1",
+        "outFields": "*",
+        "f": "json",
+        "resultRecordCount": 2000,
+    }
     summary = {"realtime_bus": [], "static_laluan": [], "static_hentian": []}
 
     # 1. Data Kedudukan Bas Live
@@ -114,7 +120,7 @@ def get_arcgis_data():
     except Exception as e:
         summary["static_laluan"] = f"Ralat: {e}"
 
-    # 3. Data Hentian Bas Static
+    # 3. Data Hentian Bas Static (SEMUA REKOD HENTIAN)
     try:
         res = requests.get(URL_STATIC_HENTIAN, params=params, verify=False).json()
         for f in res.get("features", []):
@@ -122,6 +128,9 @@ def get_arcgis_data():
             summary["static_hentian"].append({
                 "ID Hentian": attrs.get("stop_id"),
                 "Nama Hentian": attrs.get("nama_hentian"),
+                "Kod Laluan": attrs.get("kod_laluan")
+                or attrs.get("route_id")
+                or "N/A",
                 "Waktu Operasi": (
                     f"{attrs.get('waktu_pertama')} - {attrs.get('waktu_terakhir')}"
                 ),
@@ -170,14 +179,17 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
     Senarai Laluan Bas:
     {arcgis_data['static_laluan']}
 
-    Senarai Hentian Bas (Sampel):
-    {arcgis_data['static_hentian'][:30]}
+    Jumlah Keseluruhan Hentian Bas Berdaftar: {len(arcgis_data['static_hentian']) if isinstance(arcgis_data['static_hentian'], list) else 0}
+    Senarai Penuh Hentian Bas:
+    {arcgis_data['static_hentian']}
 
     --------------------------------------------------
     ARAHAN JAWAPAN:
     1. Jawab dalam Bahasa Melayu yang profesional, futuristik, dan padat.
-    2. Gunakan simbol/pencetus visual seperti 🚌, 📍, ⏱️, ⚡ untuk persembahan data digital.
-    3. Jika maklumat tiada dalam data, nyatakan dengan jujur dan jelas.
+    2. Apabila pengguna bertanyakan jumlah keseluruhan hentian bas, berikan angka tepat berdasarkan 'Jumlah Keseluruhan Hentian Bas Berdaftar'.
+    3. Untuk memadankan hentian bas dengan sesuatu laluan, padankan atribut 'Kod Laluan' antara senarai hentian dan senarai laluan.
+    4. Gunakan simbol/pencetus visual seperti 🚌, 📍, ⏱️, ⚡ untuk persembahan data digital.
+    5. Jika maklumat tiada dalam data, nyatakan dengan jujur dan jelas.
     """
 
     headers = {
