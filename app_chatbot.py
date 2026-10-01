@@ -10,6 +10,7 @@ GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", "").strip()
 
 # Endpoint REST API Rasmi Groq
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models"
 
 # Endpoint REST API ArcGIS Portal
 URL_REALTIME_BUS = "https://gisdev.planmalaysia.gov.my/server/rest/services/Hosted/myBAS_Melaka_Live_Kedudukan_Bas/FeatureServer/0/query"
@@ -23,7 +24,28 @@ st.set_page_config(
 )
 
 # ==========================================
-# 2. FUNGSI GEOMETRI (HAVERSINE)
+# 2. FUNGSI DAPATKAN SENARAI MODEL AKTIF
+# ==========================================
+def get_active_groq_models(api_key):
+    """Mendapatkan senarai dinamik model yang benar-benar aktif pada akaun Groq"""
+    if not api_key:
+        return []
+    headers = {"Authorization": f"Bearer {api_key}"}
+    try:
+        res = requests.get(GROQ_MODELS_URL, headers=headers, timeout=10)
+        if res.status_code == 200:
+            data = res.json()
+            models = [m.get("id") for m in data.get("data", []) if m.get("id")]
+            # Utamakan model LLaMA atau Llama-3.3 jika wujud
+            models.sort(key=lambda x: ("llama-3.3" in x or "llama3" in x), reverse=True)
+            return models
+    except Exception:
+        pass
+    # Fallback default terkini jika endpoint models gagal
+    return ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama3-70b-8192"]
+
+# ==========================================
+# 3. FUNGSI GEOMETRI (HAVERSINE)
 # ==========================================
 def haversine_distance(lat1, lon1, lat2, lon2):
     if None in (lat1, lon1, lat2, lon2):
@@ -68,12 +90,12 @@ st.markdown("""
 st.markdown("""
     <div class="digital-header">
         <p class="digital-title">🚌 MYBAS MELAKA // AI COMMAND</p>
-        <span class="digital-status">● MULTI-MODEL FALLBACK SYSTEM ACTIVE</span>
+        <span class="digital-status">● DYNAMIC MODEL AUTO-DISCOVERY ACTIVE</span>
     </div>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 3. TARIK DATA PENUH ARCGIS PORTAL
+# 4. TARIK DATA PENUH ARCGIS PORTAL
 # ==========================================
 @st.cache_data(ttl=30)
 def get_arcgis_data():
@@ -124,7 +146,7 @@ def get_arcgis_data():
     return summary
 
 # ==========================================
-# 4. CHATBOT INTERACTION
+# 5. CHATBOT INTERACTION
 # ==========================================
 if "messages" not in st.session_state:
     st.session_state.messages = [{
@@ -196,16 +218,8 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
 
         answer = None
         if GROQ_API_KEY:
-            # Senarai menyeluruh semua model aktif rasmi Groq
-            candidate_models = [
-                "llama-3.3-70b-versatile",
-                "llama-3.1-8b-instant",
-                "llama-3.2-11b-vision-preview",
-                "llama-3.2-3b-preview",
-                "llama-3.2-1b-preview",
-                "mixtral-8x7b-32768",
-                "gemma2-9b-it"
-            ]
+            # Dapatkan senarai model aktif semasa secara automatik dari Groq
+            active_models = get_active_groq_models(GROQ_API_KEY)
             
             headers = {
                 "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -213,7 +227,7 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
             }
 
             last_error = ""
-            for model_name in candidate_models:
+            for model_name in active_models:
                 payload = {
                     "model": model_name,
                     "messages": messages_payload,
@@ -227,9 +241,8 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
                     
                     if response.status_code == 200 and "choices" in res_data:
                         answer = res_data["choices"][0]["message"]["content"]
-                        break  # BERJAYA! Keluar dari loop tanpa semak model lain lagi
+                        break
                     else:
-                        # Jika model ini dinyahaktifkan/ralat, simpan nota dan terus cuba model seterusnya dalam loop
                         err_msg = res_data.get("error", {}).get("message", "Unknown error")
                         last_error = f"HTTP {response.status_code} ({model_name}): {err_msg}"
                         continue
@@ -238,7 +251,7 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
                     continue
 
             if not answer:
-                answer = f"⚠️ Semua model Groq gagal memberikan maklum balas. Ralat terakhir: {last_error}"
+                answer = f"⚠️ Semua model Groq gagal. Ralat terakhir: {last_error}\n\n*Petua: Sila pastikan GROQ_API_KEY di Streamlit Secrets diisi dengan betul dan tidak tamat tempoh.*"
         else:
             answer = "⚠️ Ralat: GROQ_API_KEY tidak sah atau tidak dijumpai dalam Streamlit Secrets."
 
