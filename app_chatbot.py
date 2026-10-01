@@ -1,5 +1,6 @@
 import math
 import os
+import time
 import requests
 import streamlit as st
 
@@ -90,7 +91,7 @@ st.markdown(
     """
     <div class="digital-header">
         <p class="digital-title">🚌 MYBAS MELAKA // AI COMMAND</p>
-        <span class="digital-status">● SYSTEM ONLINE (REAL-TIME GEOMETRY & ETA ACTIVE)</span>
+        <span class="digital-status">● SYSTEM ONLINE (ROUTE-FILTERED ETA ACTIVE)</span>
     </div>
 """,
     unsafe_allow_html=True,
@@ -118,9 +119,9 @@ def get_arcgis_data():
       geom = f.get("geometry", {})
       summary["realtime_bus"].append({
           "Plat/Label": attrs.get("label_bas") or attrs.get("vehicle_id"),
-          "Kod Laluan": attrs.get("kod_laluan"),
+          "Kod Laluan": str(attrs.get("kod_laluan") or "").strip().upper(),
           "Nama Laluan": attrs.get("nama_laluan"),
-          "Kelajuan (km/h)": attrs.get("kelajuan_kmh") or 30,  # Default 30km/h
+          "Kelajuan (km/h)": attrs.get("kelajuan_kmh") or 30,
           "Lat": geom.get("y"),
           "Lon": geom.get("x"),
           "Masa Kemaskini": attrs.get("last_updated"),
@@ -134,7 +135,7 @@ def get_arcgis_data():
     for f in res.get("features", []):
       attrs = f.get("attributes", {})
       summary["static_laluan"].append({
-          "Kod Laluan": attrs.get("kod_laluan"),
+          "Kod Laluan": str(attrs.get("kod_laluan") or "").strip().upper(),
           "Nama Laluan": attrs.get("nama_laluan"),
           "Jenis Perkhidmatan": attrs.get("jenis_perkhidmatan"),
           "Status Laluan": attrs.get("status_laluan"),
@@ -174,12 +175,11 @@ if "messages" not in st.session_state:
       "role": "assistant",
       "content": (
           "⚡ **Sistem AI myBAS Command Center Active.**\nSedia memproses"
-          " kueri spatial, pengiraan ETA masa nyata, dan analisis koridor"
-          " laluan."
+          " kueri spatial, penapisan laluan bas, dan pengiraan ETA tepat."
       ),
   }]
 
-# Papar Mesej Perbualan
+# Papar Mesej Perbualan Terdahulu
 for msg in st.session_state.messages:
   avatar = "🤖" if msg["role"] == "assistant" else "👤"
   st.chat_message(msg["role"], avatar=avatar).write(msg["content"])
@@ -188,108 +188,120 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
   st.session_state.messages.append({"role": "user", "content": user_input})
   st.chat_message("user", avatar="👤").write(user_input)
 
-  with st.spinner("Mengimbas geometri & data masa nyata ArcGIS..."):
+  # PAPARAN AMUM "AI SEDANG MEMPROSES JAWAPAN..."
+  with st.spinner("🤖 AI sedang memproses jawapan & menganalisis data GIS..."):
     arcgis_data = get_arcgis_data()
 
-  # Pengiraan ETA & Matriks Jarak Ringkas antara Bas Live & Hentian
-  eta_info = []
-  if isinstance(arcgis_data["realtime_bus"], list) and isinstance(
-      arcgis_data["static_hentian"], list
-  ):
-    for bus in arcgis_data["realtime_bus"][:5]:  # Ambil sampel bas aktif
-      b_lat, b_lon = bus.get("Lat"), bus.get("Lon")
-      speed = bus.get("Kelajuan (km/h)") or 30
-      if b_lat and b_lon:
-        for stop in arcgis_data["static_hentian"]:
-          s_lat, s_lon = stop.get("Lat"), stop.get("Lon")
-          dist = haversine_distance(b_lat, b_lon, s_lat, s_lon)
-          if dist is not None and dist <= 3.0:  # Hentian dalam julat 3 KM
-            eta_minutes = round((dist / max(speed, 10)) * 60)
-            eta_info.append({
-                "Plat Bas": bus.get("Plat/Label"),
-                "Kod Laluan": bus.get("Kod Laluan"),
-                "Hentian Terdekat": stop.get("Nama Hentian"),
-                "Jarak (KM)": dist,
-                "Anggaran ETA (Minit)": max(eta_minutes, 1),
-            })
+    # Matriks Pengiraan ETA Mengikut Kod Laluan Terhadap Hentian
+    eta_info = []
+    if isinstance(arcgis_data["realtime_bus"], list) and isinstance(
+        arcgis_data["static_hentian"], list
+    ):
+      for bus in arcgis_data["realtime_bus"]:
+        b_lat, b_lon = bus.get("Lat"), bus.get("Lon")
+        bus_route = bus.get("Kod Laluan")
+        speed = bus.get("Kelajuan (km/h)") or 30
 
-  system_prompt = f"""
-    Anda adalah sistem kecerdasan buatan (AI Urban Transit Assistant) untuk myBAS Melaka.
-    Gunakan format maklum balas yang kemas, digital, tepat, dan berstruktur (jadual/bullet points).
+        if b_lat and b_lon:
+          for stop in arcgis_data["static_hentian"]:
+            s_lat, s_lon = stop.get("Lat"), stop.get("Lon")
+            dist = haversine_distance(b_lat, b_lon, s_lat, s_lon)
 
-    --- DATA REALTIME (BASMY_REALTIME) ---
-    Jumlah Bas Aktif Masa Kini: {len(arcgis_data['realtime_bus']) if isinstance(arcgis_data['realtime_bus'], list) else 0}
-    Data Bas Live:
-    {arcgis_data['realtime_bus']}
+            if dist is not None and dist <= 5.0:
+              eta_minutes = round((dist / max(speed, 10)) * 60)
+              eta_info.append({
+                  "Plat Bas": bus.get("Plat/Label"),
+                  "Kod Laluan Bas": bus_route,
+                  "Nama Laluan Bas": bus.get("Nama Laluan"),
+                  "Hentian Berdekatan": stop.get("Nama Hentian"),
+                  "Jarak (KM)": dist,
+                  "Anggaran ETA (Minit)": max(eta_minutes, 1),
+              })
 
-    --- ANALISIS ETA MASA NYATA (HAVERSINE GEOMETRY MATRIX) ---
-    {eta_info if eta_info else "Tiada bas dikesan dalam julat 3km dari mana-mana hentian semasa."}
+    system_prompt = f"""
+        Anda adalah sistem kecerdasan buatan (AI Urban Transit Assistant) untuk myBAS Melaka.
+        Gunakan format maklum balas yang kemas, digital, tepat, dan berstruktur (jadual/bullet points).
 
-    --- DATA STATIC (BASMY - LALUAN & HENTIAN) ---
-    Jumlah Laluan Berdaftar: {len(arcgis_data['static_laluan']) if isinstance(arcgis_data['static_laluan'], list) else 0}
-    Senarai Laluan Bas:
-    {arcgis_data['static_laluan']}
+        --- DATA REALTIME (BASMY_REALTIME) ---
+        Jumlah Bas Aktif Masa Kini: {len(arcgis_data['realtime_bus']) if isinstance(arcgis_data['realtime_bus'], list) else 0}
+        Data Bas Live (Sertakan Kod Laluan Bas):
+        {arcgis_data['realtime_bus']}
 
-    Jumlah Keseluruhan Hentian Bas Berdaftar: {len(arcgis_data['static_hentian']) if isinstance(arcgis_data['static_hentian'], list) else 0}
-    Senarai Hentian Bas (Sampel Geometri):
-    {arcgis_data['static_hentian'][:100]}
+        --- ANALISIS ETA MASA NYATA (HAVERSINE GEOMETRY MATRIX) ---
+        {eta_info if eta_info else "Tiada bas dikesan berdekatan hentian buat masa ini."}
 
-    --------------------------------------------------
-    ARAHAN JAWAPAN & ANALISIS PINTAR:
-    1. Jawab dalam Bahasa Melayu yang profesional, futuristik, dan padat.
-    2. JUMLAH HENTIAN: Gunakan 'Jumlah Keseluruhan Hentian Bas Berdaftar' ({len(arcgis_data['static_hentian'] if isinstance(arcgis_data['static_hentian'], list) else [])}).
-    3. PENGAIRAN ETA / MASA KETIBAAN: Jika pengguna bertanya bila bas sampai atau jarak bas ke hentian, rujuk 'ANALISIS ETA MASA NYATA' di atas.
-    4. CORRIDOR MATCHING: Padankan Hentian ke Laluan berdasarkan analisis nama kawasan/jalan terdekat.
-    5. INGATAN PERBUALAN: Fahami konteks soalan terdahulu pengguna untuk soalan susulan.
-    6. Gunakan simbol visual seperti 🚌, 📍, ⏱️, ⚡.
-    """
+        --- DATA STATIC (BASMY - LALUAN & HENTIAN) ---
+        Jumlah Laluan Berdaftar: {len(arcgis_data['static_laluan']) if isinstance(arcgis_data['static_laluan'], list) else 0}
+        Senarai Laluan Bas:
+        {arcgis_data['static_laluan']}
 
-  # Menyusun Payload dengan Ingatan Perbualan (Chat History - 6 Mesej Terakhir)
-  recent_history = st.session_state.messages[-6:]
-  messages_payload = [{"role": "system", "content": system_prompt}]
+        Jumlah Keseluruhan Hentian Bas Berdaftar: {len(arcgis_data['static_hentian']) if isinstance(arcgis_data['static_hentian'], list) else 0}
+        Senarai Hentian Bas:
+        {arcgis_data['static_hentian'][:120]}
 
-  for msg in recent_history:
-    messages_payload.append({"role": msg["role"], "content": msg["content"]})
+        --------------------------------------------------
+        ARAHAN PERATURAN TEPAT (ROUTE MATCHING STRICT RULE):
+        1. UTAMAKAN KOD LALUAN: Apabila pengguna bertanyakan bas terdekat untuk sesuatu hentian atau laluan (contoh: Taman Kota Laksamana / Laluan M100), HANYA kaitkan bas yang beroperasi di laluan berkenaan (Kod Laluan M100). JANGAN padankan bas dari laluan berlainan (seperti M22) walaupun lokasinya berdekatan, melainkan pengguna bertanyakan SEMUA bas yang lalu di hentian tersebut.
+        2. Jika tiada Bas M100 yang aktif dalam sistem live, beritahu pengguna secara jelas bahawa "Tiada bas M100 aktif buat masa ini" dan elakkan daripada tersalah beri maklumat Bas M22.
+        3. Jawab dalam Bahasa Melayu yang profesional, futuristik, dan padat.
+        4. Gunakan simbol visual seperti 🚌, 📍, ⏱️, ⚡.
+        """
 
-  headers = {
-      "Authorization": f"Bearer {API_KEY}",
-      "Content-Type": "application/json",
-      "HTTP-Referer": "http://localhost:8501",
-      "X-Title": "myBAS Melaka AI",
-  }
+    recent_history = st.session_state.messages[-6:]
+    messages_payload = [{"role": "system", "content": system_prompt}]
 
-  FREE_MODELS = [
-      "google/gemini-2.0-flash-exp:free",
-      "meta-llama/llama-3.1-8b-instruct:free",
-      "mistralai/mistral-7b-instruct:free",
-      "openrouter/auto",
-  ]
+    for msg in recent_history:
+      messages_payload.append({"role": msg["role"], "content": msg["content"]})
 
-  answer = None
-  last_error = ""
-
-  for model_name in FREE_MODELS:
-    payload = {
-        "model": model_name,
-        "messages": messages_payload,
-        "temperature": 0.2,
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "http://localhost:8501",
+        "X-Title": "myBAS Melaka AI",
     }
 
-    try:
-      response = requests.post(
-          OPENROUTER_URL, headers=headers, json=payload, timeout=30
-      )
-      if response.status_code == 200:
-        data = response.json()
-        answer = data["choices"][0]["message"]["content"]
-        break
-      else:
-        last_error = f"Model {model_name} ({response.status_code}): {response.text}"
-    except Exception as e:
-      last_error = str(e)
+    FREE_MODELS = [
+        "google/gemini-2.0-flash-exp:free",
+        "meta-llama/llama-3.1-8b-instruct:free",
+        "mistralai/mistral-7b-instruct:free",
+        "openrouter/auto",
+    ]
 
-  if not answer:
-    answer = f"⚠️ Ralat Sambungan Rangkaian: {last_error}"
+    answer = None
+    last_error = ""
 
+    for model_name in FREE_MODELS:
+      payload = {
+          "model": model_name,
+          "messages": messages_payload,
+          "temperature": 0.1,
+      }
+
+      try:
+        response = requests.post(
+            OPENROUTER_URL, headers=headers, json=payload, timeout=30
+        )
+        if response.status_code == 200:
+          data = response.json()
+          answer = data["choices"][0]["message"]["content"]
+          break
+        else:
+          last_error = (
+              f"Model {model_name} ({response.status_code}): {response.text}"
+          )
+      except Exception as e:
+        last_error = str(e)
+
+    if not answer:
+      answer = f"⚠️ Ralat Sambungan Rangkaian: {last_error}"
+
+  # FUNGSI EFEK TYPING ANIMATION BILA MEMAPARKAN JAWAPAN
+  def stream_response(text):
+    for word in text.split(" "):
+      yield word + " "
+      time.sleep(0.02)  # Kelajuan menaip
+
+  # Papar maklum balas AI secara dinamik
   st.session_state.messages.append({"role": "assistant", "content": answer})
-  st.chat_message("assistant", avatar="🤖").write(answer)
+  with st.chat_message("assistant", avatar="🤖"):
+    st.write_stream(stream_response(answer))
