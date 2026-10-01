@@ -70,7 +70,7 @@ st.markdown("""
 st.markdown("""
     <div class="digital-header">
         <p class="digital-title">🚌 MYBAS MELAKA // AI COMMAND</p>
-        <span class="digital-status">● GROQ LLaMA 3.3 SDK (TOKEN OPTIMIZED)</span>
+        <span class="digital-status">● GROQ LLaMA 3.1 SDK (ONLINE)</span>
     </div>
 """, unsafe_allow_html=True)
 
@@ -206,7 +206,7 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
             try:
                 chat_completion = client.chat.completions.create(
                     messages=messages_payload,
-                    model="llama-3.3-70b-versatile",
+                    model="llama-3.1-8b-instant",
                     temperature=0.1,
                     max_tokens=600
                 )
