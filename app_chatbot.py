@@ -5,6 +5,7 @@ import streamlit as st
 # ==========================================
 # 1. KONFIGURASI OPENROUTER API (CLOUD)
 # ==========================================
+# Jangan simpan key sebenar di sini jika push ke GitHub Public
 OPENROUTER_API_KEY = "sk-or-v1-TAMPAL_API_KEY_DI_SINI"
 
 try:
@@ -20,9 +21,59 @@ URL_STATIC_LALUAN = "https://gisdev.planmalaysia.gov.my/server/rest/services/Hos
 URL_STATIC_HENTIAN = "https://gisdev.planmalaysia.gov.my/server/rest/services/Hosted/myBAS_Melaka_Hentian_Bas/FeatureServer/0/query"
 
 st.set_page_config(
-    page_title="myBAS Melaka AI Assistant", page_icon="🚌", layout="centered"
+    page_title="myBAS Melaka AI - Digital Command",
+    page_icon="🤖",
+    layout="centered",
 )
-st.title("🚌 Pembantu AI myBAS Melaka")
+
+# ==========================================
+# GAYA CSS DIGITAL & DARK MODE
+# ==========================================
+st.markdown(
+    """
+    <style>
+    /* Latar belakang utama */
+    .stApp {
+        background-color: #0B0E14;
+    }
+    /* Kad Header Digital Command */
+    .digital-header {
+        background: linear-gradient(135deg, #0D1B2A 0%, #1B263B 100%);
+        border: 1px solid #00E5FF;
+        box-shadow: 0 0 12px rgba(0, 229, 255, 0.25);
+        padding: 12px;
+        border-radius: 8px;
+        text-align: center;
+        margin-bottom: 15px;
+    }
+    .digital-title {
+        color: #00E5FF;
+        font-family: 'Courier New', monospace;
+        font-weight: bold;
+        font-size: 18px;
+        letter-spacing: 1.5px;
+        margin: 0;
+    }
+    .digital-status {
+        color: #39FF14;
+        font-size: 11px;
+        font-family: monospace;
+    }
+    </style>
+""",
+    unsafe_allow_html=True,
+)
+
+# Header Utama Visual
+st.markdown(
+    """
+    <div class="digital-header">
+        <p class="digital-title">🚌 MYBAS MELAKA // AI CONTROL</p>
+        <span class="digital-status">● SYSTEM ONLINE (ARCGIS LIVE FEED)</span>
+    </div>
+""",
+    unsafe_allow_html=True,
+)
 
 
 # ==========================================
@@ -88,26 +139,28 @@ if "messages" not in st.session_state:
     st.session_state.messages = [{
         "role": "assistant",
         "content": (
-            "Hai! Saya Pembantu AI myBAS Melaka. Sedia menjawab soalan berkaitan"
-            " laluan, hentian, dan kedudukan bas live."
+            "⚡ **Sistem AI myBAS Aktif.** Sedia memproses pertanyaan laluan,"
+            " hentian, dan status bas live."
         ),
     }]
 
+# Papar Sembang dengan Avatar Digital
 for msg in st.session_state.messages:
-    st.chat_message(msg["role"]).write(msg["content"])
+    avatar = "🤖" if msg["role"] == "assistant" else "👤"
+    st.chat_message(msg["role"], avatar=avatar).write(msg["content"])
 
-if user_input := st.chat_input("Tanya soalan (cth: Berapa bas di laluan M100?)..."):
+if user_input := st.chat_input("Input arahan / soalan di sini..."):
     st.session_state.messages.append({"role": "user", "content": user_input})
-    st.chat_message("user").write(user_input)
+    st.chat_message("user", avatar="👤").write(user_input)
 
-    with st.spinner("Mengambil data live dari ArcGIS Portal..."):
+    with st.spinner("Mengimbas data ArcGIS Portal..."):
         arcgis_data = get_arcgis_data()
 
     system_prompt = f"""
-    Anda adalah pembantu pakar Perancang Bandar (Urban Planning AI) bagi projek myBAS Melaka.
-    Berikut adalah maklumat penuh terkini dari sistem ArcGIS Portal:
+    Anda adalah sistem kecerdasan buatan (AI Urban Transit Assistant) untuk myBAS Melaka.
+    Gunakan format maklum balas yang kemas, digital, tepat, dan mudah dibaca (gunakan jadual Markdown atau bullet points jika sesuai).
 
-    --- DATA REALTIME (BASMY_REALTIME - KEDUDUKAN BAS LIVE) ---
+    --- DATA REALTIME (BASMY_REALTIME) ---
     Jumlah Bas Aktif Masa Kini: {len(arcgis_data['realtime_bus']) if isinstance(arcgis_data['realtime_bus'], list) else 0}
     Data Bas Live:
     {arcgis_data['realtime_bus']}
@@ -122,10 +175,9 @@ if user_input := st.chat_input("Tanya soalan (cth: Berapa bas di laluan M100?)..
 
     --------------------------------------------------
     ARAHAN JAWAPAN:
-    1. Jawab menggunakan Bahasa Melayu yang mesra, profesional, dan tepat.
-    2. Jika soalan melibatkan status bas 'live', guna data REALTIME.
-    3. Jika soalan melibatkan senarai laluan/hentian/waktu operasi, guna data STATIC.
-    4. Jika maklumat tiada dalam data, nyatakan dengan jujur dan sopan.
+    1. Jawab dalam Bahasa Melayu yang profesional, futuristik, dan padat.
+    2. Gunakan simbol/pencetus visual seperti 🚌, 📍, ⏱️, ⚡ untuk persembahan data digital.
+    3. Jika maklumat tiada dalam data, nyatakan dengan jujur dan jelas.
     """
 
     headers = {
@@ -135,7 +187,6 @@ if user_input := st.chat_input("Tanya soalan (cth: Berapa bas di laluan M100?)..
         "X-Title": "myBAS Melaka AI",
     }
 
-    # Senarai model percuma aktif OpenRouter terkini + auto routing
     FREE_MODELS = [
         "meta-llama/llama-3.1-8b-instruct:free",
         "google/gemini-2.0-flash-exp:free",
@@ -170,7 +221,7 @@ if user_input := st.chat_input("Tanya soalan (cth: Berapa bas di laluan M100?)..
             last_error = str(e)
 
     if not answer:
-        answer = f"Maaf, berlaku ralat sambungan ke OpenRouter. Detail: {last_error}"
+        answer = f"⚠️ Ralat Sambungan Rangkaian: {last_error}"
 
     st.session_state.messages.append({"role": "assistant", "content": answer})
-    st.chat_message("assistant").write(answer)
+    st.chat_message("assistant", avatar="🤖").write(answer)
