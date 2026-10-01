@@ -7,15 +7,10 @@ import streamlit as st
 # ==========================================
 # 1. KONFIGURASI GOOGLE GEMINI DIRECT API
 # ==========================================
-# Tampal API Key dari Google AI Studio di sini:
-GEMINI_API_KEY = "AIzaSy_TAMPAL_API_KEY_GEMINI_ANDA_DI_SINI"
+# Mengambil API Key dari Streamlit Secrets atau nilai lalai
+API_KEY = st.secrets.get("GEMINI_API_KEY", "TAMPAL_KEY_SINI_JIKA_TEST_LOCAL")
 
-try:
-  API_KEY = st.secrets.get("GEMINI_API_KEY", GEMINI_API_KEY)
-except Exception:
-  API_KEY = GEMINI_API_KEY
-
-# Endpoint Direct Google Gemini API (Model Gemini 1.5 Flash)
+# Kemaskini ke model Gemini 1.5 Flash
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={API_KEY}"
 
 # Endpoint REST API dari ArcGIS Portal
