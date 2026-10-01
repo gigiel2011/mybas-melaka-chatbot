@@ -219,7 +219,7 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
             messages_payload.append({"role": role_type, "content": msg["content"]})
 
         payload = {
-            "model": "llama-3.3-70b-versatile",  # Model LLaMA 3.3 terkini & aktif di Groq
+            "model": "openai/gpt-oss-120b",
             "messages": messages_payload,
             "temperature": 0.1
         }
