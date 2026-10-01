@@ -3,19 +3,15 @@ import os
 import time
 import requests
 import streamlit as st
-from google import genai
 
 # ==========================================
-# 1. KONFIGURASI GOOGLE GENAI SDK
+# 1. KONFIGURASI GROQ API
 # ==========================================
-# Ambil API Key dari Streamlit Secrets
-API_KEY = st.secrets.get("GEMINI_API_KEY", "")
+# Ambil API Key Groq dari Streamlit Secrets
+GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", "")
 
-# Inisialisasi Client GenAI Rasmi
-try:
-    client = genai.Client(api_key=API_KEY)
-except Exception as e:
-    client = None
+# Endpoint Groq API (OpenAI Compatible)
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 # Endpoint REST API dari ArcGIS Portal
 URL_REALTIME_BUS = "https://gisdev.planmalaysia.gov.my/server/rest/services/Hosted/myBAS_Melaka_Live_Kedudukan_Bas/FeatureServer/0/query"
@@ -81,7 +77,7 @@ st.markdown("""
 st.markdown("""
     <div class="digital-header">
         <p class="digital-title">🚌 MYBAS MELAKA // AI COMMAND</p>
-        <span class="digital-status">● GOOGLE GENAI OFFICIAL SDK ACTIVE</span>
+        <span class="digital-status">● GROQ LLaMA-3 ENGINE ACTIVE</span>
     </div>
 """, unsafe_allow_html=True)
 
@@ -155,7 +151,7 @@ def get_arcgis_data():
 if "messages" not in st.session_state:
     st.session_state.messages = [{
         "role": "assistant",
-        "content": "⚡ **Sistem AI myBAS Command Center Active.**\nSedia memproses pertanyaan laluan, penapisan bas tepat, dan carian semua hentian."
+        "content": "⚡ **Sistem AI myBAS Command Center Active (Groq LLaMA Mode).**\nSedia memproses pertanyaan laluan, penapisan bas tepat, dan carian semua hentian."
     }]
 
 for msg in st.session_state.messages:
@@ -214,22 +210,37 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
         3. Gunakan senarai penuh hentian di atas untuk mengesahkan tempat yang ditanya pengguna.
         """
 
-        full_prompt = f"SYSTEM INSTRUCTIONS:\n{system_instructions}\n\nSOALAN PENGGUNA: {user_input}"
+        # Format mesej gaya OpenAI/Groq
+        messages_payload = [{"role": "system", "content": system_instructions}]
+        
+        # Masukkan sejarah perbualan (6 mesej terakhir)
+        for msg in st.session_state.messages[-6:]:
+            role_type = "user" if msg["role"] == "user" else "assistant"
+            messages_payload.append({"role": role_type, "content": msg["content"]})
+
+        payload = {
+            "model": "llama-3.3-70b-versatile",  # Model LLaMA 3.3 terkini & aktif di Groq
+            "messages": messages_payload,
+            "temperature": 0.1
+        }
+
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY.strip()}",
+            "Content-Type": "application/json"
+        }
 
         answer = None
-        if client:
-            try:
-                # Penunjuk model rasmi yang disokong: gemini-1.5-flash
-                response = client.models.generate_content(
-                    model="gemini-1.5-flash",
-                    contents=full_prompt
-                )
-                answer = response.text
-            except Exception as e:
-                answer = f"⚠️ Ralat API Gemini SDK: {e}"
-        else:
-            answer = "⚠️ Ralat: API Key tidak dijumpai dalam Streamlit Secrets."
+        try:
+            response = requests.post(GROQ_URL, headers=headers, json=payload, timeout=30)
+            if response.status_code == 200:
+                data = response.json()
+                answer = data['choices'][0]['message']['content']
+            else:
+                answer = f"⚠️ Ralat API Groq ({response.status_code}): {response.text}"
+        except Exception as e:
+            answer = f"⚠️ Ralat Sambungan: {e}"
 
+    # EFEK MENAIP (TYPING ANIMATION)
     def stream_response(text):
         for word in text.split(" "):
             yield word + " "
