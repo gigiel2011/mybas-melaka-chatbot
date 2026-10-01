@@ -1,14 +1,16 @@
 import math
-import os
 import time
 import requests
 import streamlit as st
+from groq import Groq
 
 # ==========================================
-# 1. KONFIGURASI GROQ API
+# 1. KONFIGURASI GROQ API & CLIENT
 # ==========================================
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", "")
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+# Inisialisasi SDK Rasmi Groq untuk elak Ralat 403
+client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 # Endpoint REST API ArcGIS Portal
 URL_REALTIME_BUS = "https://gisdev.planmalaysia.gov.my/server/rest/services/Hosted/myBAS_Melaka_Live_Kedudukan_Bas/FeatureServer/0/query"
@@ -16,7 +18,7 @@ URL_STATIC_LALUAN = "https://gisdev.planmalaysia.gov.my/server/rest/services/Hos
 URL_STATIC_HENTIAN = "https://gisdev.planmalaysia.gov.my/server/rest/services/Hosted/myBAS_Melaka_Hentian_Bas/FeatureServer/0/query"
 
 st.set_page_config(
-    page_title="myBAS Melaka AI",
+    page_title="myBAS Melaka AI - Digital Command",
     page_icon="🤖",
     layout="centered"
 )
@@ -25,6 +27,7 @@ st.set_page_config(
 # 2. FUNGSI GEOMETRI (HAVERSINE)
 # ==========================================
 def haversine_distance(lat1, lon1, lat2, lon2):
+    """Mengira jarak sebenar antara dua koordinat (dalam kilometer)"""
     if None in (lat1, lon1, lat2, lon2):
         return None
     try:
@@ -67,7 +70,7 @@ st.markdown("""
 st.markdown("""
     <div class="digital-header">
         <p class="digital-title">🚌 MYBAS MELAKA // AI COMMAND</p>
-        <span class="digital-status">● GROQ ENGINE (TOKEN OPTIMIZED)</span>
+        <span class="digital-status">● GROQ LLaMA 3.3 SDK (TOKEN OPTIMIZED)</span>
     </div>
 """, unsafe_allow_html=True)
 
@@ -76,6 +79,7 @@ st.markdown("""
 # ==========================================
 @st.cache_data(ttl=30)
 def get_arcgis_data():
+    """Tarik data dari Feature Layer ArcGIS Portal"""
     params = {'where': '1=1', 'outFields': '*', 'f': 'json', 'resultRecordCount': 2000}
     summary = {"realtime_bus": [], "static_laluan": [], "static_hentian": []}
 
@@ -92,7 +96,7 @@ def get_arcgis_data():
                 "Lat": geom.get('y'),
                 "Lon": geom.get('x')
             })
-    except Exception as e:
+    except Exception:
         summary["realtime_bus"] = []
 
     try:
@@ -103,7 +107,7 @@ def get_arcgis_data():
                 "Kod": str(attrs.get('kod_laluan') or '').strip().upper(),
                 "Nama": attrs.get('nama_laluan')
             })
-    except Exception as e:
+    except Exception:
         summary["static_laluan"] = []
 
     try:
@@ -117,7 +121,7 @@ def get_arcgis_data():
                 "Lat": geom.get('y'),
                 "Lon": geom.get('x')
             })
-    except Exception as e:
+    except Exception:
         summary["static_hentian"] = []
 
     return summary
@@ -159,7 +163,7 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
                         dist = haversine_distance(b_lat, b_lon, s_lat, s_lon)
                         stop_name = str(stop.get("Nama") or "")
 
-                        # Tapis hentian yang relevan sahaja untuk jimat token (dalam 5km ATAU disebut pengguna)
+                        # Tapis hentian relevan untuk jimat token (julat 5km atau dipadankan dengan carian)
                         if dist is not None and dist <= 5.0:
                             eta_minutes = round((dist / max(speed, 10)) * 60)
                             eta_info.append({
@@ -175,7 +179,7 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
                             if stop_name not in relevant_stops:
                                 relevant_stops.append(stop_name)
 
-        # Padatkan teks hentian untuk jimat token
+        # Padatkan senarai hentian
         stops_summary = ", ".join(relevant_stops[:30]) if relevant_stops else "Tiada hentian spesifik berdekatan dikesan."
 
         system_instructions = f"""
@@ -191,34 +195,26 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
         2. Jika tiada bas aktif untuk kod laluan berkenaan, jawab secara jujur.
         """
 
-        # Ringkaskan muatan mesej (hanya ambil 3 mesej perbualan terakhir)
+        # Ringkaskan muatan mesej (3 mesej perbualan terakhir)
         messages_payload = [{"role": "system", "content": system_instructions}]
         for msg in st.session_state.messages[-3:]:
             role_type = "user" if msg["role"] == "user" else "assistant"
             messages_payload.append({"role": role_type, "content": msg["content"]})
 
-        payload = {
-            "model": "llama-3.3-70b-versatile",
-            "messages": messages_payload,
-            "temperature": 0.1,
-            "max_tokens": 600
-        }
-
-        headers = {
-            "Authorization": f"Bearer {GROQ_API_KEY.strip()}",
-            "Content-Type": "application/json"
-        }
-
         answer = None
-        try:
-            response = requests.post(GROQ_URL, headers=headers, json=payload, timeout=30)
-            if response.status_code == 200:
-                data = response.json()
-                answer = data['choices'][0]['message']['content']
-            else:
-                answer = f"⚠️️ Ralat API Groq ({response.status_code}): {response.text}"
-        except Exception as e:
-            answer = f"⚠️ Ralat Sambungan: {e}"
+        if client:
+            try:
+                chat_completion = client.chat.completions.create(
+                    messages=messages_payload,
+                    model="llama-3.3-70b-versatile",
+                    temperature=0.1,
+                    max_tokens=600
+                )
+                answer = chat_completion.choices[0].message.content
+            except Exception as e:
+                answer = f"⚠️ Ralat API Groq: {e}"
+        else:
+            answer = "⚠️ Ralat: GROQ_API_KEY tidak dijumpai dalam Streamlit Secrets."
 
     def stream_response(text):
         for word in text.split(" "):
