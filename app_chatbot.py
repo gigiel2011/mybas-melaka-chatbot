@@ -68,7 +68,7 @@ st.markdown("""
 st.markdown("""
     <div class="digital-header">
         <p class="digital-title">🚌 MYBAS MELAKA // AI COMMAND</p>
-        <span class="digital-status">● DIRECT REST API CONNECTED</span>
+        <span class="digital-status">● MULTI-MODEL FALLBACK SYSTEM ACTIVE</span>
     </div>
 """, unsafe_allow_html=True)
 
@@ -196,14 +196,23 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
 
         answer = None
         if GROQ_API_KEY:
-            # Senarai model terkini dengan fallback automatik
-            candidate_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama3-8b-8192"]
+            # Senarai menyeluruh semua model aktif rasmi Groq
+            candidate_models = [
+                "llama-3.3-70b-versatile",
+                "llama-3.1-8b-instant",
+                "llama-3.2-11b-vision-preview",
+                "llama-3.2-3b-preview",
+                "llama-3.2-1b-preview",
+                "mixtral-8x7b-32768",
+                "gemma2-9b-it"
+            ]
             
             headers = {
                 "Authorization": f"Bearer {GROQ_API_KEY}",
                 "Content-Type": "application/json"
             }
 
+            last_error = ""
             for model_name in candidate_models:
                 payload = {
                     "model": model_name,
@@ -218,13 +227,18 @@ if user_input := st.chat_input("Input arahan / soalan di sini..."):
                     
                     if response.status_code == 200 and "choices" in res_data:
                         answer = res_data["choices"][0]["message"]["content"]
-                        break
+                        break  # BERJAYA! Keluar dari loop tanpa semak model lain lagi
                     else:
-                        # Tangkap mesej ralat khusus jika ada
+                        # Jika model ini dinyahaktifkan/ralat, simpan nota dan terus cuba model seterusnya dalam loop
                         err_msg = res_data.get("error", {}).get("message", "Unknown error")
-                        answer = f"⚠️ Ralat HTTP {response.status_code} ({model_name}): {err_msg}"
+                        last_error = f"HTTP {response.status_code} ({model_name}): {err_msg}"
+                        continue
                 except Exception as e:
-                    answer = f"⚠️ Ralat Sambungan: {e}"
+                    last_error = str(e)
+                    continue
+
+            if not answer:
+                answer = f"⚠️ Semua model Groq gagal memberikan maklum balas. Ralat terakhir: {last_error}"
         else:
             answer = "⚠️ Ralat: GROQ_API_KEY tidak sah atau tidak dijumpai dalam Streamlit Secrets."
 
