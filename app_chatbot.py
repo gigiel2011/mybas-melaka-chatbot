@@ -52,7 +52,7 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     if None in (lat1, lon1, lat2, lon2):
         return None
     try:
-        R = 6371.0  # Jejari bumi dalam KM
+        R = 6371.0
         dlat = math.radians(float(lat2) - float(lat1))
         dlon = math.radians(float(lon2) - float(lon1))
         a = math.sin(dlat / 2)**2 + math.cos(math.radians(float(lat1))) * math.cos(math.radians(float(lat2))) * math.sin(dlon / 2)**2
@@ -62,16 +62,16 @@ def haversine_distance(lat1, lon1, lat2, lon2):
         return None
 
 # ==========================================
-# 4. TARIK & DENGAN CARIAN KONTEN FEATURE LAYER
+# 4. TARIK DATA FEATURE LAYER ARCGIS
 # ==========================================
 @st.cache_data(ttl=30)
 def get_gis_raw_data():
-    params = {'where': '1=1', 'outFields': '*', 'f': 'json', 'resultRecordCount': 1000}
+    params = {'where': '1=1', 'outFields': '*', 'f': 'json', 'resultRecordCount': 2000}
     data = {"buses": [], "routes": [], "stops": []}
 
-    # Bas Live
+    # 1. Feature Layer Live Bas
     try:
-        res = requests.get(URL_REALTIME_BUS, params=params, verify=False, timeout=5).json()
+        res = requests.get(URL_REALTIME_BUS, params=params, verify=False, timeout=8).json()
         for f in res.get('features', []):
             attrs = f.get('attributes', {})
             geom = f.get('geometry', {})
@@ -85,9 +85,9 @@ def get_gis_raw_data():
     except Exception:
         pass
 
-    # Laluan
+    # 2. Feature Layer Laluan
     try:
-        res = requests.get(URL_STATIC_LALUAN, params=params, verify=False, timeout=5).json()
+        res = requests.get(URL_STATIC_LALUAN, params=params, verify=False, timeout=8).json()
         for f in res.get('features', []):
             attrs = f.get('attributes', {})
             kod = str(attrs.get('kod_laluan') or '').strip().upper()
@@ -97,13 +97,13 @@ def get_gis_raw_data():
     except Exception:
         pass
 
-    # Hentian
+    # 3. Feature Layer Hentian Bas
     try:
-        res = requests.get(URL_STATIC_HENTIAN, params=params, verify=False, timeout=5).json()
+        res = requests.get(URL_STATIC_HENTIAN, params=params, verify=False, timeout=8).json()
         for f in res.get('features', []):
             attrs = f.get('attributes', {})
             geom = f.get('geometry', {})
-            nama_stop = attrs.get('nama_hentian') or attrs.get('nama_stop') or attrs.get('name')
+            nama_stop = attrs.get('nama_hentian') or attrs.get('nama_stop') or attrs.get('name') or attrs.get('OBJECTID')
             if nama_stop:
                 data["stops"].append({
                     "nama": str(nama_stop).strip(),
@@ -151,73 +151,85 @@ st.markdown("""
 if "messages" not in st.session_state:
     st.session_state.messages = [{
         "role": "assistant",
-        "content": "Hai! Saya AI Pembantu myBAS Melaka. Boleh tanya saya pasal kedudukan bas live, carian hentian, atau anggaran masa tiba (ETA)!"
+        "content": "Hai! Saya AI Pembantu myBAS Melaka. Boleh tanya saya pasal bilangan hentian, bas aktif, laluan, atau carian lokasi!"
     }]
 
 for msg in st.session_state.messages:
     avatar = "🤖" if msg["role"] == "assistant" else "👤"
     st.chat_message(msg["role"], avatar=avatar).write(msg["content"])
 
-if user_input := st.chat_input("Tanya lokasi hentian atau laluan bas di sini..."):
+if user_input := st.chat_input("Tanya apa-apa tentang myBAS Melaka di sini..."):
     st.session_state.messages.append({"role": "user", "content": user_input})
     st.chat_message("user", avatar="👤").write(user_input)
 
-    with st.spinner("Memproses carian & data kedudukan bas..."):
+    with st.spinner("Memproses data ArcGIS..."):
         gis_data = get_gis_raw_data()
         user_query_lower = user_input.lower()
 
-        # LOGIK CARIAN HENTIAN TERDEKAT BERDASARKAN INPUT PENGGUNA
-        matched_stops = []
-        for stop in gis_data["stops"]:
-            if any(word in stop["nama"].lower() for word in user_query_lower.split() if len(word) > 2):
-                matched_stops.append(stop)
+        total_bas = len(gis_data["buses"])
+        total_laluan = len(gis_data["routes"])
+        total_hentian = len(gis_data["stops"])
 
-        # KIRA ETA BAS AKTIF TERHADAP HENTIAN YANG DIJUMPAI
+        # CARIAN HENTIAN SPESIFIK (JIKA USER SEBUT NAMA LOKASI/HENTIAN)
+        matched_stops = []
+        ignore_words = ["berapa", "hentian", "di", "negeri", "melaka", "ada", "bas", "laluan", "siapa", "hi", "hello"]
+        search_words = [w for w in user_query_lower.split() if len(w) > 2 and w not in ignore_words]
+
+        if search_words:
+            for stop in gis_data["stops"]:
+                if any(word in stop["nama"].lower() for word in search_words):
+                    matched_stops.append(stop)
+
+        # KIRA ETA JIKA PENGGUNA TANYA HENTIAN SPESIFIK
         eta_results = []
         if matched_stops and gis_data["buses"]:
-            for target_stop in matched_stops[:3]:  # Ambil maksimum 3 hentian sepadan
+            for target_stop in matched_stops[:3]:
                 s_lat, s_lon = target_stop["lat"], target_stop["lon"]
                 for bus in gis_data["buses"]:
                     b_lat, b_lon = bus["lat"], bus["lon"]
                     if s_lat and s_lon and b_lat and b_lon:
                         dist = haversine_distance(b_lat, b_lon, s_lat, s_lon)
-                        if dist is not None:
-                            speed = max(bus["laju"], 15)  # Anggaran kelajuan minimum 15 km/j
+                        if dist is not None and dist <= 15.0:
+                            speed = max(bus["laju"], 15)
                             eta_min = round((dist / speed) * 60)
-                            eta_results.append(f"Hentian '{target_stop['nama']}' -> Bas {bus['plat']} (Laluan {bus['kod']}): Jarak ~{dist}km, Anggaran ETA: {max(eta_min, 1)} minit (Laju: {bus['laju']} km/h)")
+                            eta_results.append(f"Hentian '{target_stop['nama']}': Bas {bus['plat']} (Laluan {bus['kod']}) ~{dist}km, ETA: {max(eta_min, 1)} minit.")
 
-        # SUSUN TEXT SUMMARY UNTUK AI
-        total_bas = len(gis_data["buses"])
-        buses_list = [f"Plat: {b['plat']} | Laluan: {b['kod']} | Kelajuan: {b['laju']}km/h" for b in gis_data["buses"][:10]]
-        buses_summary_text = "\n".join(buses_list) if buses_list else "Tiada bas live aktif."
+        buses_list = [f"Plat: {b['plat']} | Laluan: {b['kod']} | Laju: {b['laju']}km/h" for b in gis_data["buses"][:10]]
+        buses_summary_text = "\n".join(buses_list) if buses_list else "Tiada bas aktif dikesan sekarang."
+        routes_summary_text = "\n".join(gis_data["routes"][:10]) if gis_data["routes"] else "Tiada data laluan."
+        eta_summary_text = "\n".join(eta_results) if eta_results else "Tiada carian hentian spesifik dibuat."
 
-        eta_summary_text = "\n".join(eta_results[:5]) if eta_results else "Tiada padanan bas berdekatan dikesan untuk lokasi soalan ini."
-
-        # SYSTEM PROMPT MESRA & BERFOKUS KEPADA HASIL CARIAN
+        # SYSTEM PROMPT YANG TEPAT DENGAN ANGKA RINGKASAN
         system_instructions = f"""
-        Anda ialah AI Pembantu rasmi myBAS Melaka. Jawab soalan pengguna secara rilex, santai, dan membantu dalam Bahasa Melayu.
+        Anda ialah AI Pembantu mesra myBAS Melaka. Jawab soalan pengguna dengan ringkas, jelas, dan ramah dalam Bahasa Melayu.
 
-        DATA LIVE MAKLUMAT GIS:
-        - Jumlah Bas Aktif Masa Nyata: {total_bas} bas.
+        RINGKASAN DATA KESELURUHAN ARCGIS (GUNA NOMBOR INI UNTUK MENJAWAB):
+        - Jumlah Keseluruhan Hentian Bas di Melaka: {total_hentian} hentian.
+        - Jumlah Keseluruhan Bas Aktif Masa Nyata: {total_bas} bas.
+        - Jumlah Laluan Bas: {total_laluan} laluan.
+
+        DATA TERPERINCI:
         - Senarai Bas Live:
         {buses_summary_text}
+        
+        - Senarai Laluan:
+        {routes_summary_text}
 
-        ANALISIS HASIL CARIAN LOKASI & ETA UNTUK SOALAN PENGGUNA:
+        - Analisis Carian Hentian / ETA:
         {eta_summary_text}
 
-        PANDUAN MENJAWAB:
-        1. JIKA PENGGUNA BERTANYA PASAL LOKASI/HENTIAN (Contoh: "sy di hentian hospital alor gajah jauh lagi ke"):
-           - Semak bahagian "ANALISIS HASIL CARIAN LOKASI & ETA".
-           - Jika ada bas dikesan, beritahu status jarak (KM) dan anggaran masa tiba (ETA minit) bas terdekat dengan nada peramah dan tenang.
-           - Jika tiada bas terdekat atau tiada padanan hentian, terangkan secara ringkas & jelas bahawa bas berkenaan belum menghantar isyarat live terdekat.
-        2. JIKA TEGURAN MESRA (seperti "hi", "hello"):
-           - Jawab salam mesra sahaja tanpa membebankan pengguna dengan data panjang.
-        3. JANGAN sesekali menjawab "Apa" sahaja. Berikan jawapan lengkap dan peramah.
+        ATURAN MENJAWAB:
+        1. JIKA PENGGUNA BERTANYA BILANGAN HENTIAN (Contoh: "berapa hentian di negeri melaka"):
+           - Jawab terus jumlah hentian yang dikesan iaitu **{total_hentian} hentian**.
+           - JANGAN minta lokasi pengguna atau tanya soalan pelik jika soalan hanya minta jumlah keseluruhan.
+        2. JIKA PENGGUNA BERTANYA BILANGAN BAS AKTIF:
+           - Jawab jumlah bas aktif iaitu **{total_bas} bas**.
+        3. JIKA PENGGUNA MENCARI HENTIAN/ETA SPESIFIK:
+           - Berikan maklumat berdasarkan bahagian "Analisis Carian Hentian / ETA".
         """
 
         messages_payload = [{"role": "system", "content": system_instructions}]
-        # Ambil 4 mesej perbualan terakhir untuk kekalkan konteks soalan
-        for msg in st.session_state.messages[-4:]:
+        for msg in st.session_state.messages[-3:]:
             role_type = "user" if msg["role"] == "user" else "assistant"
             messages_payload.append({"role": role_type, "content": msg["content"]})
 
@@ -235,7 +247,7 @@ if user_input := st.chat_input("Tanya lokasi hentian atau laluan bas di sini..."
                 payload = {
                     "model": model_name,
                     "messages": messages_payload,
-                    "max_tokens": 350
+                    "max_tokens": 300
                 }
                 try:
                     response = requests.post(GROQ_API_URL, headers=headers, json=payload, timeout=10)
@@ -245,7 +257,7 @@ if user_input := st.chat_input("Tanya lokasi hentian atau laluan bas di sini..."
                         answer = res_data["choices"][0]["message"]["content"]
                         break
                     else:
-                        err_msg = res_data.get("error", {}).get("message", "Tiada maklumat ralat")
+                        err_msg = res_data.get("error", {}).get("message", "Tiada ralat")
                         last_error_debug = f"HTTP {response.status_code} ({model_name}): {err_msg}"
                 except Exception as e:
                     last_error_debug = f"Exception: {str(e)}"
