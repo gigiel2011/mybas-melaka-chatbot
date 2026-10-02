@@ -46,38 +46,77 @@ def get_active_chat_models(api_key):
     return ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
 
 # ==========================================
-# 3. TARIK DATA DARI FEATURE LAYER ARCGIS
+# 3. FUNGSI GEOMETRI (HAVERSINE DISTANCE)
+# ==========================================
+def haversine_distance(lat1, lon1, lat2, lon2):
+    if None in (lat1, lon1, lat2, lon2):
+        return None
+    try:
+        R = 6371.0  # Jejari bumi dalam KM
+        dlat = math.radians(float(lat2) - float(lat1))
+        dlon = math.radians(float(lon2) - float(lon1))
+        a = math.sin(dlat / 2)**2 + math.cos(math.radians(float(lat1))) * math.cos(math.radians(float(lat2))) * math.sin(dlon / 2)**2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        return round(R * c, 2)
+    except Exception:
+        return None
+
+# ==========================================
+# 4. TARIK & DENGAN CARIAN KONTEN FEATURE LAYER
 # ==========================================
 @st.cache_data(ttl=30)
-def get_feature_layer_data():
-    params = {'where': '1=1', 'outFields': '*', 'f': 'json', 'resultRecordCount': 500}
-    layer_data = {"bas_live": [], "laluan": [], "hentian": []}
+def get_gis_raw_data():
+    params = {'where': '1=1', 'outFields': '*', 'f': 'json', 'resultRecordCount': 1000}
+    data = {"buses": [], "routes": [], "stops": []}
 
+    # Bas Live
     try:
         res = requests.get(URL_REALTIME_BUS, params=params, verify=False, timeout=5).json()
         for f in res.get('features', []):
-            layer_data["bas_live"].append(f.get('attributes', {}))
+            attrs = f.get('attributes', {})
+            geom = f.get('geometry', {})
+            data["buses"].append({
+                "plat": attrs.get('label_bas') or attrs.get('vehicle_id') or 'Bas Unknown',
+                "kod": str(attrs.get('kod_laluan') or '').strip().upper() or 'N/A',
+                "laju": attrs.get('kelajuan_kmh') or 30,
+                "lat": geom.get('y'),
+                "lon": geom.get('x')
+            })
     except Exception:
         pass
 
+    # Laluan
     try:
         res = requests.get(URL_STATIC_LALUAN, params=params, verify=False, timeout=5).json()
         for f in res.get('features', []):
-            layer_data["laluan"].append(f.get('attributes', {}))
+            attrs = f.get('attributes', {})
+            kod = str(attrs.get('kod_laluan') or '').strip().upper()
+            nama = attrs.get('nama_laluan') or ''
+            if kod:
+                data["routes"].append(f"Laluan {kod}: {nama}")
     except Exception:
         pass
 
+    # Hentian
     try:
         res = requests.get(URL_STATIC_HENTIAN, params=params, verify=False, timeout=5).json()
         for f in res.get('features', []):
-            layer_data["hentian"].append(f.get('attributes', {}))
+            attrs = f.get('attributes', {})
+            geom = f.get('geometry', {})
+            nama_stop = attrs.get('nama_hentian') or attrs.get('nama_stop') or attrs.get('name')
+            if nama_stop:
+                data["stops"].append({
+                    "nama": str(nama_stop).strip(),
+                    "lat": geom.get('y'),
+                    "lon": geom.get('x')
+                })
     except Exception:
         pass
 
-    return layer_data
+    return data
 
 # ==========================================
-# 4. GAYA UI CHAT
+# 5. GAYA UI CHAT
 # ==========================================
 st.markdown("""
     <style>
@@ -107,51 +146,78 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 5. PEMPROSESAN CHATBOT
+# 6. PEMPROSESAN CHATBOT
 # ==========================================
 if "messages" not in st.session_state:
     st.session_state.messages = [{
         "role": "assistant",
-        "content": "Hai! Saya AI Pembantu myBAS Melaka. Boleh tanya saya pasal kedudukan bas live, laluan, atau senarai hentian hari ini!"
+        "content": "Hai! Saya AI Pembantu myBAS Melaka. Boleh tanya saya pasal kedudukan bas live, carian hentian, atau anggaran masa tiba (ETA)!"
     }]
 
 for msg in st.session_state.messages:
     avatar = "🤖" if msg["role"] == "assistant" else "👤"
     st.chat_message(msg["role"], avatar=avatar).write(msg["content"])
 
-if user_input := st.chat_input("Tanya apa sahaja tentang myBAS Melaka..."):
+if user_input := st.chat_input("Tanya lokasi hentian atau laluan bas di sini..."):
     st.session_state.messages.append({"role": "user", "content": user_input})
     st.chat_message("user", avatar="👤").write(user_input)
 
-    with st.spinner("Semak data Feature Layer & memproses jawapan..."):
-        features = get_feature_layer_data()
+    with st.spinner("Memproses carian & data kedudukan bas..."):
+        gis_data = get_gis_raw_data()
+        user_query_lower = user_input.lower()
 
-        total_bas = len(features["bas_live"])
-        total_laluan = len(features["laluan"])
-        total_hentian = len(features["hentian"])
+        # LOGIK CARIAN HENTIAN TERDEKAT BERDASARKAN INPUT PENGGUNA
+        matched_stops = []
+        for stop in gis_data["stops"]:
+            if any(word in stop["nama"].lower() for word in user_query_lower.split() if len(word) > 2):
+                matched_stops.append(stop)
 
-        # Hadkan data sampel untuk memastikan saiz token sentiasa kecil
-        data_bas_sample = features["bas_live"][:10]
-        data_laluan_sample = features["laluan"][:10]
+        # KIRA ETA BAS AKTIF TERHADAP HENTIAN YANG DIJUMPAI
+        eta_results = []
+        if matched_stops and gis_data["buses"]:
+            for target_stop in matched_stops[:3]:  # Ambil maksimum 3 hentian sepadan
+                s_lat, s_lon = target_stop["lat"], target_stop["lon"]
+                for bus in gis_data["buses"]:
+                    b_lat, b_lon = bus["lat"], bus["lon"]
+                    if s_lat and s_lon and b_lat and b_lon:
+                        dist = haversine_distance(b_lat, b_lon, s_lat, s_lon)
+                        if dist is not None:
+                            speed = max(bus["laju"], 15)  # Anggaran kelajuan minimum 15 km/j
+                            eta_min = round((dist / speed) * 60)
+                            eta_results.append(f"Hentian '{target_stop['nama']}' -> Bas {bus['plat']} (Laluan {bus['kod']}): Jarak ~{dist}km, Anggaran ETA: {max(eta_min, 1)} minit (Laju: {bus['laju']} km/h)")
 
-        # SYSTEM PROMPT SANTAI & FLEKSIBEL
+        # SUSUN TEXT SUMMARY UNTUK AI
+        total_bas = len(gis_data["buses"])
+        buses_list = [f"Plat: {b['plat']} | Laluan: {b['kod']} | Kelajuan: {b['laju']}km/h" for b in gis_data["buses"][:10]]
+        buses_summary_text = "\n".join(buses_list) if buses_list else "Tiada bas live aktif."
+
+        eta_summary_text = "\n".join(eta_results[:5]) if eta_results else "Tiada padanan bas berdekatan dikesan untuk lokasi soalan ini."
+
+        # SYSTEM PROMPT MESRA & BERFOKUS KEPADA HASIL CARIAN
         system_instructions = f"""
-        Anda ialah AI Pembantu mesra myBAS Melaka. Jawab soalan pengguna dengan santai, rilex, dan mesra dalam Bahasa Melayu.
+        Anda ialah AI Pembantu rasmi myBAS Melaka. Jawab soalan pengguna secara rilex, santai, dan membantu dalam Bahasa Melayu.
 
-        DATA TERKINI FEATURE LAYER ARCGIS:
-        - Jumlah Bas Live Aktif Masa Nyata: {total_bas} bas.
-        - Ringkasan Data Bas Live: {data_bas_sample}
-        - Ringkasan Data Laluan: {data_laluan_sample}
-        - Jumlah Hentian Dikesan: {total_hentian} hentian.
+        DATA LIVE MAKLUMAT GIS:
+        - Jumlah Bas Aktif Masa Nyata: {total_bas} bas.
+        - Senarai Bas Live:
+        {buses_summary_text}
 
-        PANDUAN JAWAPAN:
-        1. Sekiranya pengguna beri teguran mesra / umum (seperti "hi", "apa awak boleh bantu"), sambut mesra dan terangkan secara ringkas yang anda boleh bantu semak status bas live, laluan, dan hentian myBAS Melaka.
-        2. Sekiranya soalan berkaitan bas/laluan/hentian, jawab berdasarkan data Feature Layer di atas secara terus.
-        3. Sekiranya data tiada atau kosong, beritahu secara jujur dan rilex.
+        ANALISIS HASIL CARIAN LOKASI & ETA UNTUK SOALAN PENGGUNA:
+        {eta_summary_text}
+
+        PANDUAN MENJAWAB:
+        1. JIKA PENGGUNA BERTANYA PASAL LOKASI/HENTIAN (Contoh: "sy di hentian hospital alor gajah jauh lagi ke"):
+           - Semak bahagian "ANALISIS HASIL CARIAN LOKASI & ETA".
+           - Jika ada bas dikesan, beritahu status jarak (KM) dan anggaran masa tiba (ETA minit) bas terdekat dengan nada peramah dan tenang.
+           - Jika tiada bas terdekat atau tiada padanan hentian, terangkan secara ringkas & jelas bahawa bas berkenaan belum menghantar isyarat live terdekat.
+        2. JIKA TEGURAN MESRA (seperti "hi", "hello"):
+           - Jawab salam mesra sahaja tanpa membebankan pengguna dengan data panjang.
+        3. JANGAN sesekali menjawab "Apa" sahaja. Berikan jawapan lengkap dan peramah.
         """
 
         messages_payload = [{"role": "system", "content": system_instructions}]
-        for msg in st.session_state.messages[-3:]:
+        # Ambil 4 mesej perbualan terakhir untuk kekalkan konteks soalan
+        for msg in st.session_state.messages[-4:]:
             role_type = "user" if msg["role"] == "user" else "assistant"
             messages_payload.append({"role": role_type, "content": msg["content"]})
 
@@ -169,7 +235,7 @@ if user_input := st.chat_input("Tanya apa sahaja tentang myBAS Melaka..."):
                 payload = {
                     "model": model_name,
                     "messages": messages_payload,
-                    "max_tokens": 300
+                    "max_tokens": 350
                 }
                 try:
                     response = requests.post(GROQ_API_URL, headers=headers, json=payload, timeout=10)
@@ -186,7 +252,7 @@ if user_input := st.chat_input("Tanya apa sahaja tentang myBAS Melaka..."):
                     continue
 
             if not answer:
-                answer = f"⚠️ Ralat Groq API: {last_error_debug if last_error_debug else 'Gagal menghubungi API'}. Sila pastikan GROQ_API_KEY sah."
+                answer = f"⚠️ Ralat Groq API: {last_error_debug if last_error_debug else 'Gagal melepasi API'}"
         else:
             answer = "⚠️ GROQ_API_KEY tidak dijumpai dalam Streamlit Secrets."
 
